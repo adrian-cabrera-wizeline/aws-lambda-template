@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  oracle:
+    image: gvenzl/oracle-xe
+    container_name: local-oracle
+    ports: ["1521:1521"]
+    environment: { ORACLE_PASSWORD: password }
+    volumes:
+      - ./seed/01_oracle_init.sql:/container-entrypoint-initdb.d/init.sql
+
+  dynamo:
+    image: amazon/dynamodb-local
+    container_name: local-dynamo
+    ports: ["8000:8000"]
+    command: "-jar DynamoDBLocal.jar -sharedDb"

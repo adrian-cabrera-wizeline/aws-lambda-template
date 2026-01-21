@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 10
+    Environment:
+      Variables:
+        AWS_SAM_LOCAL: "true"
+        LOG_LEVEL: "DEBUG"
+        ORACLE_HOST: "host.docker.internal"
+        ORACLE_PORT: "1521"
+        ORACLE_SID: "XE"
+        ORACLE_USER: "app_user"
+        ORACLE_PASSWORD: "password"
+
+Resources:
+  PriceFetcherLocal:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../dist/functions/price-fetcher/src
+      Handler: handler.handler
+      Environment:
+        Variables:
+          TABLE_AUDIT: "Audit_Logs_Local"
+
+  ConfigServiceLocal:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../dist/functions/config-service/src
+      Handler: handler.handler
+      Environment:
+        Variables:
+          TABLE_CONFIG: "App_Configs_Local"
