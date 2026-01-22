@@ -267,9 +267,253 @@ Add this to your `.vscode/launch.json` so the "Attach" feature works:
 }
 
 ```
+
 ---
 
-## 📈 9. Monitoring, Compliance & FinOps
+## 9.- Dev Pipeline Workflow in this Repo
+
+We will create a single **Reusable Workflow** in the SRE repo that handles **everything**: Setup, Testing, Building, and Deploying.
+
+**The Contract:**
+The Dev team only needs to promise one thing:
+
+> *"My code lives in `functions/<service-name>` and I have a `package.json` script."*
+
+---
+
+### Master Lifecycle (Who Does What?)
+
+This table defines the "Rules of Engagement" for the entire team, ensuring everyone knows their responsibility at each stage of the pipeline.
+
+| Phase | Environment | Actor | Action | Trigger | Goal |
+| --- | --- | --- | --- | --- | --- |
+| **1. Code** | Local | **Dev** | Writes code, runs `npm run invoke`, opens PR. | Manual | Unit Verification. |
+| **2. Review** | CI (GitHub) | **Peer / Lead** | Reviews PR. GitHub runs `ci-check` (Tests/Lint). | Open PR | Code Quality Gate. |
+| **3. Merge** | **DEV** | **Dev** | Merges PR to `main`. | Auto (Push) | Integration Check. |
+| **4. Verify** | **DEV** | **System** | Runs `verify-deployment.ts`. Alerts if Dev is broken. | Auto | Smoke Test (Circuit Breaker). |
+| **5. Promote** | N/A | **Dev / Lead** | Clicks **"Promote to QA"** in GitHub Actions. | Manual | Create Stable Snapshot. |
+| **6. Test** | **QA** | **QA Team** | Runs E2E tests against `v1.0-qa.1`. Checks for bugs. | Auto (Tag) | Functional Sign-off. |
+| **7. Promote** | N/A | **Team Lead** | Clicks **"Promote to UAT"** in GitHub Actions. | Manual | Graduate to Release Candidate. |
+| **8. UAT** | **UAT** | **Product Owner** | Log in to UAT App (`v1.0-rc.1`). Verifies business value. | Auto (Tag) | Business Sign-off. |
+| **9. Release** | N/A | **Lead / SRE** | Clicks **"Promote to PROD"** in GitHub Actions. | Manual | Authorize Go-Live. |
+| **10. Live** | **PROD + DR** | **System** | Deploys `v1.0.0` to US-East-1 (Primary) and US-West-2 (Replica). | Auto (Tag) | **Value Delivery.** |
+
+### 🔍 Key Definitions for the Team
+
+* **QA (Internal):** Technical testing. Does the button work? Does it crash?
+* **UAT (External/Business):** Value testing. Is the button the right color? Does this solve the user's problem?
+* **Release Candidate (`-rc`):** A version in UAT that is *identical* to what will go to Production. No code changes allowed here.
+
+---
+
+## 📘 10. CI/CD Workflow Reference
+
+This guide details the exact sequence of events for every environment. It serves as the definitive manual for Developers, QA, and SREs.
+
+### 🟢 ENV 1: DEVELOPMENT (The Integration Sandbox)
+
+* **Goal:** Verify that code from different developers integrates correctly and starts up without crashing.
+* **Trigger:** **Automated.** Runs immediately when code is merged (pushed) to the `main` branch.
+* **Tagging Strategy:** No Git tags. Uses `HEAD` (latest commit).
+
+**The Workflow Steps:**
+
+1. **Change Detection:** The pipeline scans the repository.
+* *Logic:* "Did files in `functions/price-fetcher` change?"
+* *Result:* If **No**, the job skips. If **Yes**, it proceeds.
+
+
+2. **Quality Gate (CI):**
+* Runs `npm run lint` to enforce coding standards.
+* Runs `npm test` (Unit Tests) using Jest and Mocks.
+* *Failure:* Pipeline stops. Developer must fix the build.
+
+
+3. **Build Artifact:**
+* SRE Template runs `esbuild`.
+* Bundles TypeScript into a single, optimized `index.js`.
+* Minifies code and excludes AWS SDK (available in runtime).
+
+
+4. **Deploy:**
+* Updates the **`price-fetcher-dev`** Lambda in `us-east-1`.
+
+
+5. **Circuit Breaker (Smoke Test):**
+* **Action:** Pipeline runs `npm run verify price-fetcher-dev`.
+* **Logic:** The script invokes the Lambda with a `{"health_check": true}` payload.
+* **Outcome:** If the Lambda crashes or returns 500, the pipeline fails and alerts the channel.
+
+
+
+---
+
+### 🟡 ENV 2: QUALITY ASSURANCE (Functional Testing)
+
+* **Goal:** A stable environment for the QA team to perform End-to-End (E2E) testing without interruptions from daily developer builds.
+* **Trigger:** **Manual.** A Developer or Lead clicks **"Run Workflow > Promote to QA"** in GitHub Actions.
+* **Tagging Strategy:** Creates an immutable tag with a suffix (e.g., `v1.0.0-qa.1`).
+
+**The Workflow Steps:**
+
+1. **Tag Calculation:**
+* The system checks the previous version (e.g., `v1.0.0`).
+* Increments the version (Patch/Minor/Major based on input).
+* Appends the `-qa` suffix.
+
+
+2. **Snapshot Creation:**
+* A Git Tag is pushed to the repo. This freezes the code state.
+
+
+3. **Deploy:**
+* The exact code from the tag is deployed to **`price-fetcher-qa`**.
+
+
+4. **QA Validation (Human Step):**
+* QA Engineers run their Postman collections or Cypress suites against the QA API endpoint.
+* *Result:* If bugs are found, Developers fix in `main` and repeat the "Promote to QA" step.
+
+
+
+---
+
+### 🟠 ENV 3: USER ACCEPTANCE (Business Sign-off)
+
+* **Goal:** Verify "Business Value". The Product Owner (PO) checks if the features meet user requirements.
+* **Trigger:** **Manual.** The Team Lead clicks **"Run Workflow > Promote to UAT"**.
+* **Tagging Strategy:** Graduates the QA tag to a Release Candidate (e.g., `v1.0.0-rc.1`).
+
+**The Workflow Steps:**
+
+1. **Promotion Logic:**
+* The system takes the current successful QA tag.
+* Replaces `-qa` with `-rc` (Release Candidate).
+
+
+2. **Deploy:**
+* Updates the **`price-fetcher-uat`** Lambda.
+* *Note:* This environment often connects to "Pre-Prod" data sources (e.g., Oracle Staging).
+
+
+3. **Business Review (Human Step):**
+* The Product Owner logs into the UAT Application.
+* They click the buttons, check the colors, and verify the pricing logic.
+* *Outcome:* If "Green", the release is approved for Production.
+
+
+
+---
+
+### 🔴 ENV 4: PRODUCTION (Live & Disaster Recovery)
+
+* **Goal:** Deliver value to customers with zero downtime and high availability.
+* **Trigger:** **Manual.** The SRE or Team Lead clicks **"Run Workflow > Promote to PROD"**.
+* **Tagging Strategy:** Creates a "Clean" SemVer tag (e.g., `v1.0.0`).
+
+**The Workflow Steps:**
+
+1. **Final Polish:**
+* The system takes the UAT tag (`v1.0.0-rc.1`).
+* Strips the suffix to create the final Gold Standard tag (`v1.0.0`).
+
+
+2. **Primary Deployment (US-East-1):**
+* Updates the live **`price-fetcher-prod`** Lambda serving real traffic.
+
+
+3. **Disaster Recovery Deployment (US-West-2):**
+* **Parallel Action:** Simultaneously deploys the *same* artifact to the DR region.
+* *Purpose:* Ensures that if US-East-1 goes down, the code is already waiting in US-West-2 (Passive/Pilot Light).
+
+
+4. **Audit Trail:**
+* The deployment time, version, and the user who clicked "Promote" are logged in GitHub Releases for compliance (FDA/HIPAA).
+
+---
+
+### 4. The Deployment Diagram
+
+```mermaid
+flowchart TD
+    %% --- ACTORS ---
+    Dev[👷 Developer]
+    QA_Team[🕵️ QA Team]
+    PO[👔 Product Owner]
+    SRE[🛡️ SRE / Lead]
+    
+    %% --- SYSTEMS ---
+    GH[GitHub Actions]
+    
+    %% ==========================================
+    %% PHASE 1: DEVELOPMENT (Integration)
+    %% ==========================================
+    subgraph PHASE_DEV ["🟢 PHASE 1: DEV (Automated)"]
+        direction TB
+        Push["Push to Main"] --> Build["Build Artifact"]
+        Build --> DeployDev["Deploy to DEV Env"]
+        DeployDev --> Verify{"Smoke Test Script"}
+        Verify -- Pass --> ReadyQA("Ready for QA")
+        Verify -- Fail --> AlertDev["❌ Alert Developer"]
+    end
+
+    %% ==========================================
+    %% PHASE 2: QA (Functional Testing)
+    %% ==========================================
+    subgraph PHASE_QA ["🟡 PHASE 2: QA (Functional)"]
+        direction TB
+        ClickQA["Click 'Promote to QA'"] --> TagQA["Tag: v1.0-qa.1"]
+        TagQA --> DeployQA["Deploy to QA Env"]
+        DeployQA --> RunE2E["🧪 QA runs E2E Tests"]
+        RunE2E --> QASignOff{"QA Sign-off?"}
+    end
+
+    %% ==========================================
+    %% PHASE 3: UAT (Business Validation)
+    %% ==========================================
+    subgraph PHASE_UAT ["🟠 PHASE 3: UAT (Validation)"]
+        direction TB
+        ClickUAT["Click 'Promote to UAT'"] --> TagRC["Tag: v1.0-rc.1"]
+        TagRC --> DeployUAT["Deploy to UAT Env"]
+        DeployUAT --> ManualCheck["👓 PO Validates Features"]
+        ManualCheck --> BizSignOff{"Business Approved?"}
+    end
+
+    %% ==========================================
+    %% PHASE 4: PRODUCTION (Delivery)
+    %% ==========================================
+    subgraph PHASE_PROD ["🔴 PHASE 4: PROD (Live)"]
+        direction TB
+        ClickProd["Click 'Promote to PROD'"] --> TagClean["Tag: v1.0.0"]
+        TagClean --> DeployPrimary["🚀 Deploy Primary (US-East)"]
+        TagClean --> DeployDR["💾 Deploy DR (US-West)"]
+    end
+
+    %% --- CONNECTIONS BETWEEN PHASES ---
+    Dev --> Push
+    
+    ReadyQA -.-> ClickQA
+    Dev --> ClickQA
+    
+    QASignOff -- Yes --> ClickUAT
+    QA_Team --> RunE2E
+    SRE --> ClickUAT
+    
+    BizSignOff -- Yes --> ClickProd
+    PO --> ManualCheck
+    SRE --> ClickProd
+
+    %% --- STYLING ---
+    classDef actor fill:#333,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef pass fill:#e6fffa,stroke:#047857,stroke-width:2px;
+    
+    class Dev,QA_Team,PO,SRE actor;
+    class Verify,QASignOff,BizSignOff pass;
+
+```
+---
+
+## 📈 10. Monitoring, Compliance & FinOps
 
 We adhere to the **AWS Well-Architected Serverless Lens**. Our strategy prioritizes **Compliance** (Security & Auditability) while leveraging **FinOps** (Cost Awareness) to minimize the Total Cost of Ownership (TCO).
 
@@ -305,5 +549,3 @@ You might ask: *"Why not use Prometheus/Grafana?"*
 2. **Cost Controls in Code:**
 * **EMF (Embedded Metric Format):** We do not make `PutMetricData` API calls (which cost money). We print metrics to standard logs, and AWS extracts them for free.
 * **Sampling:** X-Ray tracing is expensive at 100%. We configure it to sample only **5% of traffic** in Production, giving us statistical significance at 1/20th of the cost.
-
----
