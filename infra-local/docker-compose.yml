@@ -13,3 +13,6 @@ services:
     container_name: local-dynamo
     ports: ["8000:8000"]
     command: "-jar DynamoDBLocal.jar -sharedDb"
+    volumes:
+      - ./dynamo-data:/home/dynamodblocal/data 
+    working_dir: /home/dynamodblocal

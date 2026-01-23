@@ -224,17 +224,6 @@ sam local generate-event apigateway aws-proxy > infra-local/events/new-service-e
 
 ## 🪲 8. Debugging Workflows
 
-### 1. The "Pause and Attach" Method
-
-If you need to inspect variables during an API Gateway simulation:
-
-1. **Run with Debug Flag:**
-```bash
-sam local invoke -t infra-local/local-debug.yaml -e infra-local/events/price-event.json -d 5858 PriceFetcherLocal
-
-```
-
-2. **Attach VS Code:** Open VS Code, press `F5` (ensure the `.vscode/launch.json` has an "Attach to SAM Local" configuration). The execution will pause at your breakpoint.
 
 ### 2. Viewing Structured Logs
 
@@ -242,31 +231,129 @@ Since we use **AWS Lambda Powertools**, your local terminal will output logs in 
 
 * **Tip:** Install the **"JSON Crack"** or **"Pretty Logs"** extension in your terminal to view these easily. These logs will look identical to what you will see in **CloudWatch Insights** in Production.
 
+To develop and debug your Lambda functions locally without touching AWS, we will use a combination of **Docker** (to simulate the database layer) and **AWS SAM CLI** (to simulate the Lambda runtime).
+
+Here is the step-by-step workflow.
+
+### 1. The Local Architecture
+
+We replicate the cloud environment on your laptop.
+
+* **Lambda:** Simulated by AWS SAM (Serverless Application Model).
+* **Oracle:** Simulated by the `gvenzl/oracle-xe` Docker container.
+* **DynamoDB:** Simulated by the `amazon/dynamodb-local` Docker container.
+* **Network:** SAM containers and Database containers communicate via a bridge network (`host.docker.internal`).
+
 ---
 
-### Updated `.vscode/launch.json`
+### 2. One-Time Setup
 
-Add this to your `.vscode/launch.json` so the "Attach" feature works:
+Ensure you have these prerequisites installed:
 
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Attach to SAM Local",
-      "type": "node",
-      "request": "attach",
-      "address": "localhost",
-      "port": 5858,
-      "localRoot": "${workspaceFolder}/functions/price-fetcher",
-      "remoteRoot": "/var/task",
-      "protocol": "inspector",
-      "stopOnEntry": false
-    }
-  ]
-}
+* **Docker Desktop** (Must be running)
+* **Node.js 20+**
+* **AWS SAM CLI** (`brew install aws-sam-cli` or download installer)
+
+---
+
+### 3. Step-by-Step: Development Workflow
+
+#### Step 1: Start the Infrastructure
+
+Open a terminal in your project root. Run the custom script defined in your `package.json`.
+
+```bash
+npm run dev:env
 
 ```
+
+**What happens?**
+
+1. `docker-compose up` starts the Oracle and DynamoDB containers.
+2. The script waits 10 seconds (giving Oracle time to boot).
+3. It runs `seed-dynamo.ts` to create the "Audit_Logs_Local" table.
+4. Oracle initializes automatically using the SQL file mounted in `docker-compose.yml`.
+
+#### Step 2: Run a Request (The "Invoke")
+
+To test your code, you don't need to deploy. You just "invoke" it against the local infrastructure.
+
+```bash
+npm run invoke:price
+
+```
+
+**What happens?**
+
+1. **Build:** Runs `esbuild` to compile your TypeScript into `dist/`.
+2. **SAM Invoke:**
+* Reads `infra-local/local-debug.yaml`.
+* Spins up a temporary Docker container mimicking the AWS Lambda environment.
+* Mounts the compiled code.
+* Injects the environment variables (`ORACLE_HOST=host.docker.internal`).
+* Sends the JSON payload from `infra-local/events/price-event.json`.
+
+
+3. **Result:** You see the JSON response in your terminal.
+
+```json
+{"statusCode":200,"body":"{\"productId\":\"PROD-101\",\"price\":99.99,\"currency\":\"USD\"}"}
+
+```
+
+---
+
+### 4. Step-by-Step: Debugging (Breakpoints) 🐞
+
+Console logs are fine, but sometimes you need to inspect variables line-by-line.
+
+#### A. Configure VS Code
+
+Create/Update the `.vscode/launch.json` file. This tells VS Code how to attach to the SAM debugger.
+
+#### B. Run the Debug Session
+
+1. **Terminal:** Run the invoke command with the debug flag (`-d`).
+```bash
+# This compiles the code and waits on port 5858
+npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/price-event.json -d 5858 PriceFetcherLocal
+```
+
+
+*Output:* `Debugger listening on ws://0.0.0.0:5858/...`
+
+2. **VS Code:**
+* Open `functions/price-fetcher/src/service.ts`.
+* Click the **Red Dot** in the margin to set a breakpoint.
+* Go to the **Run and Debug** tab (Play icon with a bug).
+* Select **"Attach to SAM Local"** and press Play (▶️).
+
+
+3. **Result:**
+* The terminal will resume execution.
+* VS Code will **freeze** at your breakpoint.
+* You can hover over variables like `productId` or `oracle` to see their values locally!
+
+---
+
+### 5. Troubleshooting Local Issues
+
+| Issue | Likely Cause | Solution |
+| --- | --- | --- |
+| **"Connection Refused"** | Lambda container cannot see `localhost`. | Ensure `local-debug.yaml` uses `host.docker.internal` for DB hosts. |
+| **"Table Not Found"** | DynamoDB Local is in-memory only. | If you restarted the container, run `npm run db:seed` to recreate tables. |
+| **"Handler Not Found"** | You didn't compile the latest code. | Always run `npm run build` before invoking SAM. |
+| **"Process exited with code 1"** | TypeScript compilation error. | Check your terminal for `esbuild` errors (missing types, syntax errors). |
+
+### 6. Summary of Commands
+
+| Goal | Command |
+| --- | --- |
+| **Start DBs** | `npm run dev:env` |
+| **Test "Price Fetcher"** | `npm run invoke:price` |
+| **Test "Config Service"** | `npm run invoke:config` |
+| **Run Unit Tests** | `npm test` |
+| **Stop Everything** | `npm run db:stop` |
 
 ---
 
@@ -343,8 +430,6 @@ This guide details the exact sequence of events for every environment. It serves
 * **Action:** Pipeline runs `npm run verify price-fetcher-dev`.
 * **Logic:** The script invokes the Lambda with a `{"health_check": true}` payload.
 * **Outcome:** If the Lambda crashes or returns 500, the pipeline fails and alerts the channel.
-
-
 
 ---
 

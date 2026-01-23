@@ -1,14 +1,35 @@
 {
   "compilerOptions": {
+    /* Basic Options */
     "target": "ES2022",
     "module": "CommonJS",
     "rootDir": "./",
     "outDir": "./dist",
+    
+    /* Strictness & Resolution */
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
+    "skipLibCheck": true,        // 👈 Skips internal library errors
+    "moduleResolution": "node",  // 👈 Crucial for finding @aws-lambda-powertools middleware
+    "resolveJsonModule": true,
+
+    /* Path Mapping */
     "baseUrl": ".",
-    "paths": { "@common/*": ["common/*"] }
+    "paths": {
+      "@common/*": ["common/*"]
+    },
+
+    /* Type Declaration */
+    "types": ["node", "aws-lambda", "jest"] // 👈 Explicitly lists the types to load
   },
-  "include": ["functions/**/*", "common/**/*", "infra-local/**/*"]
+  "include": [
+    "functions/**/*", 
+    "common/**/*", 
+    "infra-local/**/*"
+  ],
+  "exclude": [
+    "node_modules", 
+    "dist", 
+    "cdk.out"
+  ]
 }
