@@ -1,39 +1,191 @@
 # 📘 Developer Handbook: Cloud Backend Monorepo
 
-This repository is a production-grade TypeScript monorepo for AWS Lambda services. It follows a **Shared Core** architecture to ensure that security, database connectivity, and observability (HIPAA/FDA compliant) are consistent across all services.
+### What does this App do?
+
+**Business Goal:**
+This application is a **High-Compliance Pricing Microservice**.
+It allows authorized systems (like a Web Frontend or Mobile App) to look up the current price of a product. However, because this is likely for a regulated industry (like Finance or Healthcare), it must strictly **Audit** every single lookup to answer the question: *"Who looked at this price, and when?"*
+
+**Key Technical Functions:**
+
+1. **Retrieves Data:** Fetches relational data (Prices, Currency) from a legacy SQL database (**Oracle**).
+2. **Ensures Compliance:** Logs an immutable "Audit Trail" into a high-speed NoSQL database (**DynamoDB**).
+3. **Validates Strictness:** Rejects any request that doesn't look perfect (using **Zod**).
+
+---
+
+### 🌊 The Data Journey (Step-by-Step)
+
+Imagine a user named "Alice" clicks "Check Price" on the frontend. Here is exactly what happens to her data packet:
+
+#### 1. The Entry (The Request)
+
+* **Actor:** Client (Frontend/Postman)
+* **Action:** Sends a GET request: `/price?id=PROD-101&userId=Alice-UUID`.
+* **Gatekeeper:** **API Gateway** receives the request. It handles SSL termination and passes the packet to the Lambda.
+
+#### 2. The Brain (The Lambda Handler)
+
+* **Step A: Validation (Zod)**
+* The Lambda wakes up.
+* It asks: *"Is `id` alphanumeric? Is `userId` a valid UUID?"*
+* *If Bad:* It stops immediately and returns `400 Bad Request`.
+* *If Good:* It proceeds.
+
+
+* **Step B: The Look-Up (Oracle)**
+* The Lambda grabs a connection from the connection pool (managed by middleware).
+* It sends a SQL query: `SELECT price FROM product_prices WHERE product_id = :id`.
+* **Oracle** replies: `{ "price": 99.99, "currency": "USD" }` (or `null` if not found).
+
+
+* **Step C: The Compliance Log (DynamoDB)**
+* Regardless of the result, the Lambda **must** record this attempt.
+* It constructs an Audit Item:
+```json
+{
+  "pk": "USER#Alice-UUID",
+  "sk": "AUDIT#2026-01-23T12:00:00Z",
+  "action": "PRICE_FETCH",
+  "status": "SUCCESS"
+}
+
+```
+
+
+* It pushes this JSON to **DynamoDB**.
+
+
+
+#### 3. The Exit (The Response)
+
+* **Action:** The Lambda constructs a standardized JSON response.
+* **Return:** It sends the object back to API Gateway, which serializes it to a string and sends it to Alice.
+
+---
+
+### 🖼️ Visual Data Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as 👤 User/Client
+    participant APIG as 🚪 API Gateway
+    participant Lambda as ⚡ Price Fetcher Lambda
+    participant Oracle as 🛢️ Oracle DB (Prices)
+    participant Dynamo as 📝 DynamoDB (Audit)
+
+    Note over Client, APIG: HTTP GET /price?id=PROD-101
+
+    Client->>APIG: Request Price
+    APIG->>Lambda: Invoke Handler (JSON Event)
+
+    activate Lambda
+    
+    %% Validation Phase
+    Lambda->>Lambda: 🛡️ Validate Inputs (Zod)
+    alt Invalid Input
+        Lambda-->>Client: 400 Bad Request
+    end
+
+    %% Logic Phase
+    Lambda->>Oracle: 🔍 SELECT price FROM products...
+    activate Oracle
+    Oracle-->>Lambda: Return Row {99.99, USD}
+    deactivate Oracle
+
+    %% Audit Phase
+    Lambda->>Dynamo: ✍️ PutItem (Audit Log)
+    activate Dynamo
+    Dynamo-->>Lambda: Ack (Success)
+    deactivate Dynamo
+
+    %% Response Phase
+    Lambda-->>APIG: Return { "price": 99.99 }
+    deactivate Lambda
+
+    APIG-->>Client: 200 OK (JSON)
+
+```
+
+---
+
+### 🧩 Why this Architecture?
+
+1. **Why Oracle?**
+* **Reason:** "Relational Truth." Pricing data is often complex, relational, and requires strict consistency (ACID) found in SQL databases.
+
+
+2. **Why DynamoDB?**
+* **Reason:** "High-Volume Write." Audit logs can be massive. If 1 million users check prices, Oracle might choke on the inserts. DynamoDB handles massive write throughput easily and we can set a **TTL (Time-to-Live)** to auto-delete logs after 90 days to save money.
+
+
+3. **Why Lambda?**
+* **Reason:** "Bursty Traffic." Pricing checks happen sporadically. Lambda scales to 0 when no one is checking (saving money) and scales to 1,000s when a sale happens.
+  
 
 ## 📂 Project Directory Structure
 
 ```text
-/dev-application-monorepo
-├── 📁 common/                 # SHARED CORE: Logic used by all services
-│   ├── 📁 middleware/         #   - Onion layers: withDbConnection, Logger, Zod validation
-│   ├── 📁 utils/              #   - Global clients: Oracle Pool, DynamoDB Client
-│   ├── 📁 types/              #   - Shared TypeScript interfaces and contracts
-│   └── 📁 constants/          #   - Application-wide error codes and enums
-├── 📁 functions/              # MICROSERVICES: Independent business units
-│   ├── 📁 price-fetcher/      #   - Service: Oracle Integration & Audit Logging
-│   │   ├── 📁 src/            #       - Core source code
-│   │   │   ├── handler.ts     #       - Entry point (HTTP Parsing & Validation)
-│   │   │   ├── service.ts     #       - Pure business logic
-│   │   │   ├── repository-oracle.ts # - Oracle SQL queries
-│   │   │   ├── repository-dynamo.ts # - DynamoDB Audit logging
-│   │   │   └── schema.ts      #       - Zod Request/Response validation
-│   │   └── 📁 tests/          #       - Jest unit and integration tests
-│   └── 📁 config-service/     #   - Service: User Configuration Management
-├── 📁 infra-local/            # LOCAL SIMULATION HARNESS
-│   ├── 📁 events/             #   - Mock API Gateway JSON payloads
-│   ├── 📁 seed/               #   - Database initialization scripts (SQL & TS)
-│   ├── local-debug.yaml       #   - AWS SAM template for local Lambda simulation
-│   └── docker-compose.yml     #   - Container config for Oracle & DynamoDB
-├── esbuild.config.js          # Build system configuration
-├── package.json               # Root dependencies and workflow scripts
-└── tsconfig.json              # Global TypeScript configuration
+
+lambda-monorepo/
+├── 📁 .github/
+│   └── workflows/
+│       └── main.yml               # CI/CD Pipeline (Delegates to SRE Templates)
+├── 📁 common/                        # 🧠 SHARED KERNEL (The "Glue" of the Monorepo)
+│   ├── 📁 constants/                 # Magic strings (e.g., Error Codes, Table Names)
+│   ├── 📁 middleware/                # Reusable logic (Logger, DB Connection, Header Normalizer)
+│   ├── 📁 models/                    # Zod Schemas (Single source of truth for Data)
+│   ├── 📁 scripts/                   # Utility scripts (Verification, Formatting)
+│   ├── 📁 types/                     # TS Interfaces shared across boundaries
+│   └── 📁 utils/                     # Clients (Oracle Pool, DynamoDB Client)
+├── 📁 functions/                     # ⚡ MICROSERVICES
+│   ├── 📁 price-fetcher/             # Feature: Product Price Lookup
+│   │   ├── 📁 src/
+│   │   │   ├── dto.ts             # Input Validation (Request Schema)
+│   │   │   ├── handler.ts         # Controller (Middy chain, HTTP entry point)
+│   │   │   ├── repository-*.ts    # Data Access (Oracle & Dynamo separated)
+│   │   │   └── service.ts         # Pure Business Logic
+│   │   └── 📁 tests/                 # Unit Tests
+│   └── 📁 config-service/            # Feature: System Configuration
+├── 📁 infra-local/                   # 🏗️ LOCAL SIMULATION (Docker & SAM)
+│   ├── 📁 events/                    # JSON payloads for local testing
+│   ├── 📁 seed/                      # SQL and TS scripts to populate local DBs
+│   ├── docker-compose.yml         # Defines Oracle & DynamoDB containers
+│   └── local-debug.yaml           # SAM Template for local invocation
+├── .gitignore
+├── esbuild.config.js              # Bundler config (Optimizes TS -> JS for Lambda)
+├── jest.config.js                 # Test runner configuration
+├── package.json                   # Dependencies & "npm run" scripts
+├── setup.js                       # One-click project scaffolder
+└── tsconfig.json                  # TypeScript compiler rules
 
 ```
 ---
 
-## 🛠 1. Development Environment Setup
+### 📋 Folders & Files Responsibilities
+
+| Folder/File | Responsibility | Use Case |
+| :--- | :--- | :--- |
+| **`.github/workflows`** | **CI/CD Pipeline Configuration**<br>Defines the automation logic for testing, building, and deploying the application. | Used automatically by GitHub when code is pushed to `main` or when a "Promote" button is clicked to deploy to QA/Prod. |
+| **`common/middleware`** | **Cross-Cutting Logic**<br>Contains shared code that wraps around Lambda handlers (Logging, Error Handling, DB Connection). | Used to inject the Oracle connection into the context or to ensure every log line has a standard JSON format. |
+| **`common/models`** | **Data Contracts (Schema)**<br>Single source of truth for data structures using Zod. | Used by both the Database Repositories (to save data) and the API (to validate incoming requests) to ensure consistency. |
+| **`common/scripts`** | **Dev & CI Tooling**<br>Helper scripts for local development and CI verification. | `verify-deployment.ts` is run by the CI pipeline to "smoke test" a deploy. `format-response.js` is run by developers to read JSON in the terminal. |
+| **`common/utils`** | **Infrastructure Clients**<br>Singleton instances for connecting to external services. | Used to get a connection from the Oracle Pool or to switch the DynamoDB client between "Localhost" and "Real AWS" modes. |
+| **`functions/[name]/src`** | **Microservice Source Code**<br>Contains the specific logic for a single function (e.g., Price Fetcher). | Developers work here daily to add features. This is the only code that changes when business requirements change. |
+| **`.../src/handler.ts`** | **The Controller**<br>The entry point for the Lambda. Handles HTTP request/response and middleware wiring. | Used to parse the incoming event, run validation, and catch errors before they crash the Lambda. |
+| **`.../src/service.ts`** | **The Business Logic**<br>Pure functions that make decisions based on data. | Used to calculate the final price or decide if a user is allowed to see data. Isolated for easy Unit Testing. |
+| **`.../src/repository.ts`** | **The Data Access Layer**<br>Handles all SQL queries and DynamoDB commands. | Used whenever the app needs to talk to a database. Prevents SQL injection and handles DB-specific errors. |
+| **`infra-local`** | **Local Simulation Environment**<br>Configuration for running the cloud stack on a laptop. | Used during the "Inner Loop" of development to run `npm run dev:env` and spin up local databases. |
+| **`infra-local/docker-compose.yml`** | **Container Definition**<br>Defines the Oracle XE and DynamoDB Local images and networking. | Used to start the databases with a single command (`docker-compose up`) ensuring everyone uses the same DB version. |
+| **`infra-local/local-debug.yaml`** | **SAM Template**<br>Tells AWS SAM how to run the Lambda locally. | Used by `sam local invoke` to inject environment variables (like `ORACLE_HOST=host.docker.internal`) that are unique to the local machine. |
+| **`esbuild.config.js`** | **Build Configuration**<br>Settings for compiling and bundling TypeScript. | Used during `npm run build` to convert readable TypeScript into a single, minified `index.js` file for the Lambda runtime. |
+| **`setup.js`** | **Project Scaffolding**<br>A script to create the folder structure from scratch. | Used only once when initializing the project or when a new developer joins and needs to verify their structure. |
+| **`package.json`** | **Dependency & Script Manager**<br>Lists libraries and defines shortcut commands. | Used to install tools (`npm install`) and run common tasks like `npm run invoke:price` or `npm test`. |
+
+---
+
+## 🛠 Development Environment Setup
 
 ### Prerequisites
 
@@ -50,7 +202,6 @@ Run this at the root of the project to install the compiler, build tools, and sh
 
 ```bash
 npm install
-
 ```
 
 ### Step 2: Spin Up Local Infrastructure
@@ -60,30 +211,75 @@ This project uses Docker to simulate the cloud environment (Oracle and DynamoDB)
 ```bash
 # Start the containers and seed the data automatically
 npm run dev:env
+```
+
+## 🚀 Development Workflow
+
+To develop and debug your Lambda functions locally without touching AWS, we will use a combination of **Docker** (to simulate the database layer) and **AWS SAM CLI** (to simulate the Lambda runtime).
+
+Here is the step-by-step workflow.
+
+### The Local Architecture
+
+We replicate the cloud environment on your laptop.
+
+* **Lambda:** Simulated by AWS SAM (Serverless Application Model).
+* **Oracle:** Simulated by the `gvenzl/oracle-xe` Docker container.
+* **DynamoDB:** Simulated by the `amazon/dynamodb-local` Docker container.
+* **Network:** SAM containers and Database containers communicate via a bridge network (`host.docker.internal`).
+
+### Workflow Steps 
+#### Summary of Commands
+
+| Goal | Command |
+| --- | --- |
+| **Start DBs** | `npm run dev:env` |
+| **Test "Price Fetcher"** | `npm run invoke:price` |
+| **Run Unit Tests** | `npm test` |
+| **Stop Everything** | `npm run db:stop` |
+
+#### Step 1: Start the Infrastructure
+
+Open a terminal in your project root. Run the custom script defined in your `package.json`.
+
+```bash
+npm run dev:env
+```
+
+**What happens?**
+
+1. `docker-compose up` starts the Oracle and DynamoDB containers.
+2. The script waits 10 seconds (giving Oracle time to boot).
+3. It runs `seed-dynamo.ts` to create the "Audit_Logs_Local" table.
+4. Oracle initializes automatically using the SQL file mounted in `docker-compose.yml`.
+
+#### Step 2: Run a Request (The "Invoke")
+
+To test your code, you don't need to deploy. You just "invoke" it against the local infrastructure.
+
+```bash
+npm run invoke:price
+```
+
+**What happens?**
+
+1. **Build:** Runs `esbuild` to compile your TypeScript into `dist/`.
+2. **SAM Invoke:**
+* Reads `infra-local/local-debug.yaml`.
+* Spins up a temporary Docker container mimicking the AWS Lambda environment.
+* Mounts the compiled code.
+* Injects the environment variables (`ORACLE_HOST=host.docker.internal`).
+* Sends the JSON payload from `infra-local/events/price-event.json`.
+
+
+3. **Result:** You see the JSON response in your terminal.
+
+```json
+{"statusCode":200,"body":"{\"productId\":\"PROD-101\",\"price\":99.99,\"currency\":\"USD\"}"}
 
 ```
 
----
-
-## 📂 2. Folder & File Responsibilities
-
-| Folder / File | Responsibility | Use Case |
-| --- | --- | --- |
-| `common/` | **Global Logic** | Code that *every* Lambda needs (Logger, DB Clients, Auth). |
-| `common/middleware/` | **Cross-cutting Concerns** | Middy wrappers for DB injection, Zod validation, and Error handling. |
-| `common/utils/` | **Resource Clients** | Singleton instances of Oracle and DynamoDB SDKs. |
-| `functions/` | **Service Domain** | Independent business logic units (e.g., Price Fetcher, Config). |
-| `functions/X/src/` | **Source Code** | Contains the `handler` (entry), `service` (logic), and `repository` (DB). |
-| `functions/X/tests/` | **Unit Testing** | Jest files for testing logic without calling real databases. |
-| `infra-local/` | **Local Simulation** | Configuration for Docker and AWS SAM local execution. |
-| `infra-local/seed/` | **Data Provisioning** | SQL and TS scripts that populate your local DBs on startup. |
-| `esbuild.config.js` | **Build System** | Bundles TypeScript into production-ready JavaScript. |
-
----
-
-## 🚀 3. Development Workflow
-
-### A. The "Build-Invoke" Cycle
+### The "Build-Invoke" Cycle
 
 Because AWS Lambda runs JavaScript, you must compile your TypeScript before testing.
 
@@ -92,66 +288,18 @@ Because AWS Lambda runs JavaScript, you must compile your TypeScript before test
 3. **Test:** `npm run test` (executes Jest unit tests with mocks)
 4. **Invoke:** `npm run invoke:price` (runs the function locally via SAM).
 
-### B. Database Seeding
+### Database Seeding
 
 * **Oracle:** Automatically seeds via `infra-local/seed/01_oracle_init.sql` when the container first starts.
 * **DynamoDB:** Seeds via `npm run db:seed`. This script creates the tables and inserts mock JSON items.
 
-### C. Testing
+### Testing
 
 * **Unit Tests:** Run `npm test` to execute Jest. These tests use mocks, so no Docker is required.
 * **Integration Tests:** Use `npm run invoke:<service_name>` to test the full flow from Handler → Service → Docker DB.
 
 ---
-
-## 🪲 4. Debugging in VS Code
-
-You can set breakpoints in your TypeScript code and step through a local Lambda execution.
-
-1. **Start SAM in Debug Mode:**
-```bash
-sam local invoke -t infra-local/local-debug.yaml -d 5858 <FunctionName>
-
-```
-
-
-2. **Attach VS Code:**
-* Open the "Run and Debug" tab.
-* Select the **"Attach to SAM Local"** configuration.
-* Press **F5**.
-
-
-3. **Execution:** The terminal will wait until the debugger is attached, then trigger your breakpoint.
-
----
-
-## 🔑 5. Environment Variables & Secret Management
-
-This project uses environment variables to switch between local and cloud resources.
-
-| Variable | Source (Local) | Source (Cloud/Terraform) | Purpose |
-| --- | --- | --- | --- |
-| `AWS_SAM_LOCAL` | Set to `true` in SAM | Not set | Used by `common/utils` to point to Docker. |
-| `ORACLE_HOST` | `host.docker.internal` | RDS/OCI Private IP | The address of the Oracle DB. |
-| `TABLE_AUDIT` | `Audit_Logs_Local` | Terraform Output | The DynamoDB table name for audit trails. |
-| `ORACLE_USER` | `app_user` | AWS Secrets Manager | Database credentials. |
-
-> **Note:** In the local environment, these variables are managed inside `infra-local/local-debug.yaml`. In Production, the SRE team injects these via Terraform into the Lambda configuration.
-
----
-
-## 👮 6. Security & Compliance Rules
-
-To maintain **HIPAA/FDA** compliance, every developer must follow these rules:
-
-1. **No Plain SQL:** Never use string concatenation for queries. Always use **Bind Variables** in the repository layer.
-2. **Validation:** Every request must be validated by **Zod** in the `handler` or `schema` file.
-3. **Audit Logs:** Every "Read" from Oracle must trigger a corresponding "Audit Write" to DynamoDB.
-4. **Logging:** Never log PII (Personal Identifiable Information). Use the `logger` utility to ensure logs are structured but clean.
-
----
-
-## 🛰️ 7. API Gateway Simulation & Local Testing
+## 🛰️ API Gateway Simulation & Local Testing
 
 Because your Lambdas are designed to sit behind an AWS API Gateway, they expect a specific JSON "Proxy Event" structure (containing headers, query parameters, and a stringified body). You cannot simply run the code with `node index.js`.
 
@@ -173,7 +321,6 @@ In `infra-local/events/price-event.json`, we store a mock API Gateway request:
     "requestId": "local-test-id"
   }
 }
-
 ```
 
 **2. The Execution:**
@@ -182,14 +329,12 @@ In `infra-local/events/price-event.json`, we store a mock API Gateway request:
 # This uses SAM to "wrap" your code in the official Lambda Docker image 
 # and feeds it the JSON event above.
 npm run invoke:price
-
 ```
 
----
 
-### B. Testing via Local API Server (Recommended for Frontend Integration)
+### Testing via Local API Server (Recommended for Frontend Integration)
 
-If you want to test your Lambda using **Postman** or a **Browser**, you can tell SAM to host a local HTTP server that behaves exactly like API Gateway.
+If you want to test your Lambda using **Postman** or a **Browser**, you can tell SAM to host a local HTTP server that behaves exactly like API Gateway. 
 
 **1. Start the Local Server:**
 
@@ -204,114 +349,29 @@ The server will start on `http://127.0.0.1:3000`. You can now use Postman to hit
 
 * **GET** `http://127.0.0.1:3000/price?id=PROD-101&userId=xxx`
 
----
-
-### C. Generating New Mock Events
+### Generating New Mock Events
 
 We use JSON files in `infra-local/events/` to simulate HTTP requests.
 
-* **Location:** `infra-local/events/price-event.json`
 * **Usage:** SAM reads this file and "injects" it into your handler as the `event` object.
 
-If you create a new Lambda (e.g., a POST request for Salesforce), you can generate a valid API Gateway mock event using the SAM CLI:
+If you create a new Lambda (e.g., a POST request for Salesforce or an API), you can generate a valid API Gateway mock event using the SAM CLI:
 
 ```bash
 # Generates a boilerplate API Gateway Proxy event
 sam local generate-event apigateway aws-proxy > infra-local/events/new-service-event.json
-
 ```
 ---
 
-## 🪲 8. Debugging Workflows
-
-
-### 2. Viewing Structured Logs
-
-Since we use **AWS Lambda Powertools**, your local terminal will output logs in JSON format.
-
-* **Tip:** Install the **"JSON Crack"** or **"Pretty Logs"** extension in your terminal to view these easily. These logs will look identical to what you will see in **CloudWatch Insights** in Production.
-
-To develop and debug your Lambda functions locally without touching AWS, we will use a combination of **Docker** (to simulate the database layer) and **AWS SAM CLI** (to simulate the Lambda runtime).
-
-Here is the step-by-step workflow.
-
-### 1. The Local Architecture
-
-We replicate the cloud environment on your laptop.
-
-* **Lambda:** Simulated by AWS SAM (Serverless Application Model).
-* **Oracle:** Simulated by the `gvenzl/oracle-xe` Docker container.
-* **DynamoDB:** Simulated by the `amazon/dynamodb-local` Docker container.
-* **Network:** SAM containers and Database containers communicate via a bridge network (`host.docker.internal`).
-
----
-
-### 2. One-Time Setup
-
-Ensure you have these prerequisites installed:
-
-* **Docker Desktop** (Must be running)
-* **Node.js 20+**
-* **AWS SAM CLI** (`brew install aws-sam-cli` or download installer)
-
----
-
-### 3. Step-by-Step: Development Workflow
-
-#### Step 1: Start the Infrastructure
-
-Open a terminal in your project root. Run the custom script defined in your `package.json`.
-
-```bash
-npm run dev:env
-
-```
-
-**What happens?**
-
-1. `docker-compose up` starts the Oracle and DynamoDB containers.
-2. The script waits 10 seconds (giving Oracle time to boot).
-3. It runs `seed-dynamo.ts` to create the "Audit_Logs_Local" table.
-4. Oracle initializes automatically using the SQL file mounted in `docker-compose.yml`.
-
-#### Step 2: Run a Request (The "Invoke")
-
-To test your code, you don't need to deploy. You just "invoke" it against the local infrastructure.
-
-```bash
-npm run invoke:price
-
-```
-
-**What happens?**
-
-1. **Build:** Runs `esbuild` to compile your TypeScript into `dist/`.
-2. **SAM Invoke:**
-* Reads `infra-local/local-debug.yaml`.
-* Spins up a temporary Docker container mimicking the AWS Lambda environment.
-* Mounts the compiled code.
-* Injects the environment variables (`ORACLE_HOST=host.docker.internal`).
-* Sends the JSON payload from `infra-local/events/price-event.json`.
-
-
-3. **Result:** You see the JSON response in your terminal.
-
-```json
-{"statusCode":200,"body":"{\"productId\":\"PROD-101\",\"price\":99.99,\"currency\":\"USD\"}"}
-
-```
-
----
-
-### 4. Step-by-Step: Debugging (Breakpoints) 🐞
+### Step-by-Step: Debugging (Breakpoints) 🐞
 
 Console logs are fine, but sometimes you need to inspect variables line-by-line.
 
-#### A. Configure VS Code
+#### Configure VS Code
 
-Create/Update the `.vscode/launch.json` file. This tells VS Code how to attach to the SAM debugger.
+Create/Update the `.vscode/launch.json` file(already have an example in this repo). This tells VS Code how to attach to the SAM debugger.
 
-#### B. Run the Debug Session
+#### Run the Debug Session
 
 1. **Terminal:** Run the invoke command with the debug flag (`-d`).
 ```bash
@@ -319,24 +379,21 @@ Create/Update the `.vscode/launch.json` file. This tells VS Code how to attach t
 npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/price-event.json -d 5858 PriceFetcherLocal
 ```
 
-
 *Output:* `Debugger listening on ws://0.0.0.0:5858/...`
 
-2. **VS Code:**
+**VS Code:**
 * Open `functions/price-fetcher/src/service.ts`.
 * Click the **Red Dot** in the margin to set a breakpoint.
 * Go to the **Run and Debug** tab (Play icon with a bug).
-* Select **"Attach to SAM Local"** and press Play (▶️).
+* Select **"Attach to SAM Local"** and press Play.
 
 
-3. **Result:**
+**Result:**
 * The terminal will resume execution.
 * VS Code will **freeze** at your breakpoint.
 * You can hover over variables like `productId` or `oracle` to see their values locally!
 
----
-
-### 5. Troubleshooting Local Issues
+#### Troubleshooting Local Issues
 
 | Issue | Likely Cause | Solution |
 | --- | --- | --- |
@@ -345,19 +402,35 @@ npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e event
 | **"Handler Not Found"** | You didn't compile the latest code. | Always run `npm run build` before invoking SAM. |
 | **"Process exited with code 1"** | TypeScript compilation error. | Check your terminal for `esbuild` errors (missing types, syntax errors). |
 
-### 6. Summary of Commands
+---
 
-| Goal | Command |
-| --- | --- |
-| **Start DBs** | `npm run dev:env` |
-| **Test "Price Fetcher"** | `npm run invoke:price` |
-| **Test "Config Service"** | `npm run invoke:config` |
-| **Run Unit Tests** | `npm test` |
-| **Stop Everything** | `npm run db:stop` |
+## 🔑 Environment Variables & Secret Management
+
+This project uses environment variables to switch between local and cloud resources.
+
+| Variable | Source (Local) | Source (Cloud/Terraform) | Purpose |
+| --- | --- | --- | --- |
+| `AWS_SAM_LOCAL` | Set to `true` in SAM | Not set | Used by `common/utils` to point to Docker. |
+| `ORACLE_HOST` | `host.docker.internal` | RDS/OCI Private IP | The address of the Oracle DB. |
+| `TABLE_AUDIT` | `Audit_Logs_Local` | Terraform Output | The DynamoDB table name for audit trails. |
+| `ORACLE_USER` | `app_user` | AWS Secrets Manager | Database credentials. |
+
+> **Note:** In the local environment, these variables are managed inside `infra-local/local-debug.yaml`. In Production, the SRE team injects these via Terraform into the Lambda configuration.
 
 ---
 
-## 9.- Dev Pipeline Workflow in this Repo
+## 👮 Security & Compliance Rules
+
+To maintain **HIPAA/FDA** compliance, every developer must follow these rules:
+
+1. **No Plain SQL:** Never use string concatenation for queries. Always use **Bind Variables** in the repository layer.
+2. **Validation:** Every request must be validated by **Zod** in the `handler` or `schema` file.
+3. **Audit Logs:** Every "Read" from Oracle must trigger a corresponding "Audit Write" to DynamoDB.
+4. **Logging:** Never log PII (Personal Identifiable Information). Use the `logger` utility to ensure logs are structured but clean.
+
+---
+
+## Dev Pipeline Workflow in this Repo
 
 We will create a single **Reusable Workflow** in the SRE repo that handles **everything**: Setup, Testing, Building, and Deploying.
 
@@ -366,7 +439,6 @@ The Dev team only needs to promise one thing:
 
 > *"My code lives in `functions/<service-name>` and I have a `package.json` script."*
 
----
 
 ### Master Lifecycle (Who Does What?)
 
