@@ -14,16 +14,16 @@ import { processRequest } from './service';
 const lambdaHandler = async (event: any, context: any) => {
   // Health Check for CI/CD
   if (event.health_check) return { statusCode: 200, body: "OK" };
-  
+
   const validation = PriceRequestSchema.safeParse(event);
   if (!validation.success) {
     logger.warn("Validation Failed", { issues: validation.error.issues });
-    return { 
-      statusCode: 400, 
-      body: JSON.stringify({ code: ERROR_CODES.VALIDATION_ERROR, details: validation.error.issues }) 
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ code: ERROR_CODES.VALIDATION_ERROR, details: validation.error.issues })
     };
   }
-  
+
   const { id, userId } = validation.data.queryStringParameters;
 
   // Logic Execution
@@ -40,4 +40,4 @@ export const handler = middy(lambdaHandler)
   .use(injectLambdaContext(logger))
   .use(captureLambdaHandler(tracer))
   .use(httpHeaderNormalizer())
-  .use(oracleMiddleware()); // Manages DB Connection
+  .use(oracleMiddleware());

@@ -8,7 +8,8 @@
     "db:stop": "docker-compose -f infra-local/docker-compose.yml down",
     "db:seed": "npx ts-node infra-local/seed/seed-dynamo.ts",
     "dev:env": "npm run db:start && echo '⏳ Waiting for DBs...' && node -e \"setTimeout(() => {}, 10000)\" && npm run db:seed",
-    "invoke:price": "npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/price-event.json PriceFetcherLocal",
+    "invoke:price:raw": "npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/price-event.json PriceFetcherLocal",
+    "invoke:price":"npm run invoke:price:raw 2>NUL | node common/scripts/format-response.js",
     "invoke:config": "npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/config-event.json ConfigServiceLocal"
   },
   "dependencies": {
