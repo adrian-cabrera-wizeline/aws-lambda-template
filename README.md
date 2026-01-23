@@ -8,59 +8,66 @@ It allows authorized systems (like a Web Frontend or Mobile App) to look up the 
 
 **Key Technical Functions:**
 
-1. **Retrieves Data:** Fetches relational data (Prices, Currency) from a legacy SQL database (**Oracle**).
-2. **Ensures Compliance:** Logs an immutable "Audit Trail" into a high-speed NoSQL database (**DynamoDB**).
-3. **Validates Strictness:** Rejects any request that doesn't look perfect (using **Zod**).
+# Price Fetcher Service - User Journeys
+
+This service manages the lifecycle of products using a **Dual-Write Architecture**. It maintains the *Current State* in Oracle (for transactional integrity) and an *Immutable History* in DynamoDB (for audit compliance).
+
+## 1. Create Product (POST)
+**Goal:** Initialize a new item in the inventory.
+
+1.  **Request:** User sends `POST /product` with `{ name, price }`.
+2.  **Validation:**
+    * `name` must be 3+ characters.
+    * `price` must be positive.
+3.  **Oracle Transaction:**
+    * Generates a new UUID.
+    * Inserts row into `PRODUCTS` table with status `ACTIVE`.
+4.  **Audit Log:**
+    * Writes a `CREATE` event to DynamoDB (`PK: PRODUCT#{UUID}`).
+5.  **Response:** Returns `201 Created` with the generated `{ id }`.
 
 ---
 
-### 🌊 The Data Journey (Step-by-Step)
+## 2. Get Product (GET)
+**Goal:** Retrieve the current live status of a product.
 
-Imagine a user named "Alice" clicks "Check Price" on the frontend. Here is exactly what happens to her data packet:
+1.  **Request:** User sends `GET /product?id={UUID}`.
+2.  **Oracle Query:**
+    * Selects the row where `ID = {UUID}`.
+3.  **Data Mapping:**
+    * Maps Oracle columns (e.g., `UPDATED_AT`) to JSON camelCase (`updatedAt`).
+4.  **Response:**
+    * If found: Returns `200 OK` with product details.
+    * If missing: Returns `404 Not Found`.
 
-#### 1. The Entry (The Request)
+---
 
-* **Actor:** Client (Frontend/Postman)
-* **Action:** Sends a GET request: `/price?id=PROD-101&userId=Alice-UUID`.
-* **Gatekeeper:** **API Gateway** receives the request. It handles SSL termination and passes the packet to the Lambda.
+## 3. Update Price (PUT)
+**Goal:** Change the price and record the history of the change.
 
-#### 2. The Brain (The Lambda Handler)
+1.  **Request:** User sends `PUT /product` with `{ id, price }`.
+2.  **Pre-Flight Check:**
+    * Fetches the product from Oracle to verify it exists and get the *old price*.
+3.  **Oracle Update:**
+    * Updates `PRICE` column and sets `UPDATED_AT = SYSDATE`.
+4.  **Audit Log:**
+    * Writes an `UPDATE` event to DynamoDB.
+    * **Payload:** Includes both `oldPrice` and `newPrice` for diffing.
+5.  **Response:** Returns `200 OK`.
 
-* **Step A: Validation (Zod)**
-* The Lambda wakes up.
-* It asks: *"Is `id` alphanumeric? Is `userId` a valid UUID?"*
-* *If Bad:* It stops immediately and returns `400 Bad Request`.
-* *If Good:* It proceeds.
+---
 
+## 4. Recall Product (DELETE)
+**Goal:** Soft-delete a product for compliance/safety reasons.
 
-* **Step B: The Look-Up (Oracle)**
-* The Lambda grabs a connection from the connection pool (managed by middleware).
-* It sends a SQL query: `SELECT price FROM product_prices WHERE product_id = :id`.
-* **Oracle** replies: `{ "price": 99.99, "currency": "USD" }` (or `null` if not found).
-
-
-* **Step C: The Compliance Log (DynamoDB)**
-* Regardless of the result, the Lambda **must** record this attempt.
-* It constructs an Audit Item:
-```json
-{
-  "pk": "USER#Alice-UUID",
-  "sk": "AUDIT#2026-01-23T12:00:00Z",
-  "action": "PRICE_FETCH",
-  "status": "SUCCESS"
-}
-
-```
-
-
-* It pushes this JSON to **DynamoDB**.
-
-
-
-#### 3. The Exit (The Response)
-
-* **Action:** The Lambda constructs a standardized JSON response.
-* **Return:** It sends the object back to API Gateway, which serializes it to a string and sends it to Alice.
+1.  **Request:** User sends `DELETE /product?id={UUID}`.
+2.  **Oracle Update (Soft Delete):**
+    * Does **NOT** remove the row.
+    * Updates `STATUS` to `INACTIVE`.
+3.  **Audit Log:**
+    * Writes a `DEACTIVATE` event to DynamoDB.
+    * **Payload:** Includes the reason ("Manual API Recall").
+4.  **Response:** Returns `200 OK` confirming status is now `inactive`.
 
 ---
 

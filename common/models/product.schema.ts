@@ -1,14 +1,19 @@
 import { z } from 'zod';
 
-// 1. Define the Schema (Runtime Validation)
+// DOMAIN MODEL: Represents a valid row in the Database
 export const ProductSchema = z.object({
-  productId: z.string(),
-  name: z.string().optional(),
-  price: z.number().positive(),
-  currency: z.enum(['USD', 'EUR', 'GBP']),
-  lastUpdated: z.date().optional()
+    id: z.string().uuid(),
+    name: z.string(),
+    price: z.number(),
+    status: z.enum(['ACTIVE', 'INACTIVE']), // 👈 Enforced Status
+    updatedAt: z.date(), // 👈 Internal Date Object
 });
 
-// 2. Export the Type (Compile-time)
-// Any code importing this gets the TypeScript type automatically inferred from Zod
-export type Product = z.infer<typeof ProductSchema>;
+// AUDIT MODEL: Represents a valid entry in DynamoDB
+export const AuditLogSchema = z.object({
+    pk: z.string().startsWith('PRODUCT#'),
+    sk: z.string().datetime(), // ISO 8601 String
+    action: z.enum(['CREATE', 'UPDATE', 'DEACTIVATE']),
+    userId: z.string(),
+    snapshot: z.record(z.any()), // Flexible JSON payload
+});

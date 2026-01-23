@@ -8,9 +8,23 @@
     "db:stop": "docker-compose -f infra-local/docker-compose.yml down",
     "db:seed": "npx ts-node infra-local/seed/seed-dynamo.ts",
     "dev:env": "npm run db:start && echo '⏳ Waiting for DBs...' && node -e \"setTimeout(() => {}, 10000)\" && npm run db:seed",
-    "invoke:price:raw": "npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/price-event.json PriceFetcherLocal",
-    "invoke:price":"npm run invoke:price:raw 2>NUL | node common/scripts/format-response.js",
-    "invoke:config": "npm run build && cd infra-local && sam local invoke -t local-debug.yaml -e events/config-event.json ConfigServiceLocal"
+    "build:price": "esbuild functions/price-fetcher/src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/price-fetcher/handler.js --sourcemap",
+    "build:config": "esbuild functions/config-service/src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/config-service/handler.js --sourcemap",
+    
+    "invoke:price:create:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/create-product.json",
+    "invoke:price:create": "npm run invoke:price:create:raw 2>NUL | node common/scripts/format-response.js",
+
+    "invoke:price:get:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/get-product.json",
+    "invoke:price:get": "npm run invoke:price:get:raw 2>NUL | node common/scripts/format-response.js",
+
+    "invoke:price:update:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/update-price.json",
+    "invoke:price:update": "npm run invoke:price:update:raw 2>NUL | node common/scripts/format-response.js",
+
+    "// --- ⚙️ CONFIG SERVICE ACTIONS ---": "",
+    "invoke:config:raw": "npm run build:config && sam local invoke ConfigServiceFunction -t infra-local/local-debug.yaml -e infra-local/events/config-test.json",
+    "invoke:config": "npm run invoke:config:raw 2>NUL | node common/scripts/format-response.js",
+    "// --- 🔌 MODE SWITCHING (Optional) ---": "",
+    "invoke:create:cloud": "sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/create-product.json --parameter-overrides IsOffline=false"
   },
   "dependencies": {
     "@aws-lambda-powertools/logger": "^1.18.1",
@@ -19,9 +33,11 @@
     "@aws-sdk/client-dynamodb": "^3.400.0",
     "@aws-sdk/lib-dynamodb": "^3.400.0",
     "@middy/core": "^4.6.0",
+    "@middy/http-error-handler": "^7.0.2",
     "@middy/http-header-normalizer": "^4.6.0",
     "@middy/http-json-body-parser": "^4.6.0",
     "oracledb": "^6.0.0",
+    "uuid": "^13.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {

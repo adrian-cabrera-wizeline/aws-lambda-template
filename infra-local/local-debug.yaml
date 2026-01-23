@@ -1,35 +1,77 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
+Description: Local Debug Stack (Pre-Built Mode)
+
+Parameters:
+  IsOffline:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
 
 Globals:
   Function:
     Runtime: nodejs20.x
-    Timeout: 10
+    Timeout: 20
     Environment:
       Variables:
+        POWERTOOLS_SERVICE_NAME: "monorepo-local"
+        LOG_LEVEL: "INFO" 
         AWS_SAM_LOCAL: "true"
-        LOG_LEVEL: "DEBUG"
-        ORACLE_HOST: "host.docker.internal"
-        ORACLE_PORT: "1521"
-        ORACLE_SID: "XEPDB1"
-        ORACLE_USER: "app_user"
-        ORACLE_PASSWORD: "password"
 
 Resources:
-  PriceFetcherLocal:
+  # ============================================================
+  # 1. SHARED RESOURCES
+  # ============================================================
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: product-audit-trail-local
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  # ============================================================
+  # 2. PRICE FETCHER (Points to Dist)
+  # ============================================================
+  PriceFetcherFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../dist/functions/price-fetcher/src
+      # ⚠️ POINTS TO BUILT CODE
+      CodeUri: ../dist/price-fetcher
       Handler: handler.handler
       Environment:
         Variables:
-          TABLE_AUDIT: "Audit_Logs_Local"
+          IS_OFFLINE: !Ref IsOffline
+          AUDIT_TABLE: !Ref AuditTable
+          ORACLE_CONN_STRING: "123.45.67.89:1521/XEPDB1" 
+          ORACLE_USER: "app_user"
+          ORACLE_PASSWORD: "password"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuditTable
 
-  # ConfigServiceLocal:
-  #   Type: AWS::Serverless::Function
-  #   Properties:
-  #     CodeUri: ../dist/functions/config-service/src
-  #     Handler: handler.handler
-  #     Environment:
-  #       Variables:
-  #         TABLE_CONFIG: "App_Configs_Local"
+  # ============================================================
+  # 3. CONFIG SERVICE (Points to Dist)
+  # ============================================================
+  ConfigServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # ⚠️ POINTS TO BUILT CODE
+      CodeUri: ../dist/config-service
+      Handler: handler.handler
+      Environment:
+        Variables:
+          IS_OFFLINE: !Ref IsOffline
+
+Outputs:
+  AuditTableName:
+    Description: "Local DynamoDB Table Name"
+    Value: !Ref AuditTable

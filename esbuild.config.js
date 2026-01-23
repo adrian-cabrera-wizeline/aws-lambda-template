@@ -6,6 +6,7 @@ const entryPoints = glob.sync('functions/*/src/handler.ts');
 
 esbuild.build({
   entryPoints,
+  keepNames:true,// 👈 CRITICAL: Keeps "OracleRepository" instead of "a" in X-Ray
   bundle: true,
   minify: true,
   platform: 'node',

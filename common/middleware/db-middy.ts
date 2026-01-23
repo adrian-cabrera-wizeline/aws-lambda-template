@@ -1,6 +1,6 @@
 import middy from '@middy/core';
 import { getOraclePool } from '../utils/oracle-client';
-import { logger } from './logger';
+import { logger } from './observability';
 
 export const oracleMiddleware = (): middy.MiddlewareObj<any, any> => ({
   before: async (request) => {

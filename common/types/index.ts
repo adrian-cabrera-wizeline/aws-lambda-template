@@ -1,17 +1,24 @@
-// 1. Re-export Zod Models (The "One-Stop Shop" pattern)
-export * from '../models/product.schema';
-import { Context } from 'aws-lambda';
-import { Connection } from 'oracledb';
+import { z } from 'zod';
+import { ProductSchema, AuditLogSchema } from '../models/product.schema';
 
-export interface AuditLogItem {
-  userId: string;
-  action: 'PRICE_FETCH' | 'CONFIG_UPDATE' | 'LOGIN_ATTEMPT';
-  resourceId: string;
-  status: 'SUCCESS' | 'FAILURE' | 'NOT_FOUND';
-  timestamp: string;
-  details?: Record<string, any>; // Optional extra JSON data
-}
 
-export interface CustomContext extends Context {
-  db: Connection; // 👈 This tells TS that 'context.db' exists and is an Oracle Connection
+// 1. THE "AUTO-GENERATED" PART (Zod Inference)
+
+// 🟢 You write this line ONCE.
+// 🟢 TypeScript automatically figures out the shape.
+// 🟢 If you add "color: z.string()" to ProductSchema, this type gets "color: string" instantly.
+export type Product = z.infer<typeof ProductSchema>;
+export type AuditLog = z.infer<typeof AuditLogSchema>;
+
+
+// 2. THE MANUAL PART (Database Rows)
+
+// 🔴 Zod cannot see your Oracle Database.
+// 🔴 You must manually define what the Raw SQL returns (usually Uppercase).
+export interface OracleProductRow {
+    ID: string;
+    NAME: string;
+    PRICE: number;
+    STATUS: string;
+    UPDATED_AT: Date;
 }

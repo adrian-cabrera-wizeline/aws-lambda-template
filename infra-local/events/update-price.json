@@ -1,0 +1,12 @@
+{
+    "httpMethod": "PUT",
+    "path": "/product",
+    "resource": "/product",
+    "headers": {
+        "Content-Type": "application/json"
+    },
+    "queryStringParameters": null,
+    "pathParameters": null,
+    "body": "{\"id\": \"REPLACE_WITH_REAL_UUID\", \"price\": 450.00}",
+    "isBase64Encoded": false
+}

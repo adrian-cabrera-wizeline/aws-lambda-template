@@ -12,7 +12,8 @@
     "skipLibCheck": true,        // 👈 Skips internal library errors
     "moduleResolution": "node",  // 👈 Crucial for finding @aws-lambda-powertools middleware
     "resolveJsonModule": true,
-
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     /* Path Mapping */
     "baseUrl": ".",
     "paths": {
@@ -22,14 +23,6 @@
     /* Type Declaration */
     "types": ["node", "aws-lambda", "jest"] // 👈 Explicitly lists the types to load
   },
-  "include": [
-    "functions/**/*", 
-    "common/**/*", 
-    "infra-local/**/*"
-  ],
-  "exclude": [
-    "node_modules", 
-    "dist", 
-    "cdk.out"
-  ]
+ "include": ["common/**/*"], 
+  "exclude": ["functions", "node_modules", "dist","cdk.out"]
 }

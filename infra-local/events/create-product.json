@@ -1,0 +1,13 @@
+{
+    "httpMethod": "POST",
+    "path": "/product",
+    "resource": "/product",
+    "headers": {
+        "Content-Type": "application/json",
+        "Accept": "*/*"
+    },
+    "queryStringParameters": null,
+    "pathParameters": null,
+    "body": "{\"name\": \"Cryo Model Deca\", \"price\": 1499.99}",
+    "isBase64Encoded": false
+}

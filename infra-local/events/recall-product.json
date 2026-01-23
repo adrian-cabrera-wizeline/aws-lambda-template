@@ -1,0 +1,14 @@
+{
+    "httpMethod": "DELETE",
+    "path": "/product",
+    "resource": "/product",
+    "headers": {
+        "Accept": "application/json"
+    },
+    "queryStringParameters": {
+        "id": "REPLACE_WITH_REAL_UUID"
+    },
+    "pathParameters": null,
+    "body": null,
+    "isBase64Encoded": false
+}
