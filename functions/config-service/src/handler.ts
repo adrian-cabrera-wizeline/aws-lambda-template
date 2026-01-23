@@ -1,5 +1,5 @@
 import middy from '@middy/core';
-import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger';
 import { logger } from '@common/middleware/logger';
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "@common/utils/dynamo-client";

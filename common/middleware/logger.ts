@@ -8,8 +8,8 @@ const isLocal = process.env.AWS_SAM_LOCAL === 'true';
 // 1. Logger: Structured JSON
 export const logger = new Logger({ serviceName, logLevel: 'INFO' });
 
-// 2. Metrics: FinOps (EMF format avoids API costs)
+// 2. Metrics:(EMF format avoids API costs)
 export const metrics = new Metrics({ namespace: 'CloudBackend', serviceName });
 
-// 3. Tracer: FinOps (Disabled locally to save speed/cost)
+// 3. Tracer:(Disabled locally to save speed/cost)
 export const tracer = new Tracer({ serviceName, enabled: !isLocal });
