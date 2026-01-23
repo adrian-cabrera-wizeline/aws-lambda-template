@@ -1,0 +1,16 @@
+name: "💾 Disaster Recovery Sync"
+
+on:
+  workflow_run:
+    workflows: ["Unified Delivery Pipeline"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  sync:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    uses: my-org/sre-templates/.github/workflows/reusable-dr-sync.yml@v1
+    with:
+      source_run_id: ${{ github.event.workflow_run.id }}
+      service_names_json: '["price-fetcher", "config-service"]'
+    secrets: inherit

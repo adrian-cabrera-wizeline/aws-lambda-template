@@ -1,97 +1,62 @@
-name: Application Lifecycle
+name: "🚀 Unified Delivery Pipeline"
 
 on:
-  pull_request:              # CI Check
-    branches: ["main"]
-  push:                      # Deploy DEV
-    branches: ["main"]
-  workflow_dispatch:         # Manual Promotion Button
-    inputs:
-      target:
-        type: choice
-        description: "Promote Code To:"
-        options: 
-          - "QA (Internal Testing)"
-          - "UAT (Business Sign-off)"
-          - "PROD (Go Live)"
-      bump:
-        type: choice
-        default: "patch"
-        options: ["patch", "minor", "major"]
-  push:                      # Deploy Targets (Triggered by Tags)
-    tags: ["v*"]
-
-permissions:
-  id-token: write
-  contents: write
+  push:
+    branches: [ main ]
 
 jobs:
-  # --------------------------------------------------------
-  # 1. CI GATE
-  # --------------------------------------------------------
-  ci-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - run: npm ci && npm run lint && npm test
-
-  # --------------------------------------------------------
-  # 2. PROMOTION ENGINE
-  # --------------------------------------------------------
-  promote:
-    if: github.event_name == 'workflow_dispatch'
-    needs: ci-check
-    uses: my-org/sre-templates/.github/workflows/tag-manager.yml@v1
+  # ------------------------------------------------------------------
+  # STAGE 1: FACTORY (Build, Tag, Scan, Upload)
+  # ------------------------------------------------------------------
+  factory:
+    uses: my-org/sre-templates/.github/workflows/reusable-build-factory.yml@v1
     with:
-      # Map selection to SRE target identifiers
-      env_target: >-
-        ${{ 
-          inputs.target == 'QA (Internal Testing)' && 'qa' || 
-          (inputs.target == 'UAT (Business Sign-off)' && 'uat' || 'prod') 
-        }}
-      bump_type: ${{ inputs.bump }}
+      artifact_bucket: "my-org-artifacts"
+      service_names_json: '["price-fetcher", "config-service"]'
+    secrets: inherit # Passes SONAR_TOKEN, AWS_ROLE, etc.
 
-  # --------------------------------------------------------
-  # 3. DEPLOYMENT ENGINE (Supports Dev, QA, UAT, Prod)
-  # --------------------------------------------------------
-  deploy:
-    if: github.event_name == 'push'
-    needs: ci-check
-    strategy:
-      matrix:
-        service: ['price-fetcher', 'config-service']
-    uses: my-org/sre-templates/.github/workflows/standard-deploy.yml@v1
+  # ------------------------------------------------------------------
+  # STAGE 2: AUTOMATIC TRAIN (Dev -> QA)
+  # ------------------------------------------------------------------
+  deploy-dev:
+    needs: factory
+    uses: my-org/sre-templates/.github/workflows/reusable-promote-train.yml@v1
     with:
-      service_name: ${{ matrix.service }}
-      # 🧠 Routing Logic:
-      # -qa.* -> QA Env
-      # -rc.* -> UAT Env
-      # Clean -> PROD Env
-      # Main  -> DEV Env
-      environment: >-
-        ${{ 
-          contains(github.ref, '-qa') && 'qa' || 
-          contains(github.ref, '-rc') && 'uat' || 
-          (startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev') 
-        }}
-      region: 'us-east-1'
-    secrets:
-      AWS_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE }} 
+      environment: dev
+      version_tag: ${{ needs.factory.outputs.new_version }}
+      artifact_bucket: "my-org-artifacts"
+      service_names_json: '["price-fetcher", "config-service"]'
+    secrets: inherit
 
-  # --------------------------------------------------------
-  # 4. DISASTER RECOVERY (Prod Only)
-  # --------------------------------------------------------
-  deploy-dr:
-    # Only runs on CLEAN tags (Not QA, Not RC)
-    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref, '-')
-    needs: deploy
-    strategy:
-      matrix:
-        service: ['price-fetcher', 'config-service']
-    uses: my-org/sre-templates/.github/workflows/standard-deploy.yml@v1
+  deploy-qa:
+    needs: deploy-dev
+    uses: my-org/sre-templates/.github/workflows/reusable-promote-train.yml@v1
     with:
-      service_name: ${{ matrix.service }}
-      environment: 'prod-dr'
-      region: 'us-west-2'
-    secrets:
-      AWS_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE }}
+      environment: qa
+      version_tag: ${{ needs.factory.outputs.new_version }}
+      artifact_bucket: "my-org-artifacts"
+      service_names_json: '["price-fetcher", "config-service"]'
+    secrets: inherit
+
+  # ------------------------------------------------------------------
+  # STAGE 3: GATED TRAIN (UAT -> Prod)
+  # ------------------------------------------------------------------
+  deploy-uat:
+    needs: deploy-qa
+    uses: my-org/sre-templates/.github/workflows/reusable-promote-train.yml@v1
+    with:
+      environment: uat # 🛑 GITHUB PAUSES HERE FOR QA LEAD
+      version_tag: ${{ needs.factory.outputs.new_version }}
+      artifact_bucket: "my-org-artifacts"
+      service_names_json: '["price-fetcher", "config-service"]'
+    secrets: inherit
+
+  deploy-prod:
+    needs: deploy-uat
+    uses: my-org/sre-templates/.github/workflows/reusable-promote-train.yml@v1
+    with:
+      environment: prod # 🛑 GITHUB PAUSES HERE FOR MANAGER
+      version_tag: ${{ needs.factory.outputs.new_version }}
+      artifact_bucket: "my-org-artifacts"
+      service_names_json: '["price-fetcher", "config-service"]'
+    secrets: inherit
