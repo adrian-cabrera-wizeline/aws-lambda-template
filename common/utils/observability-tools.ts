@@ -1,6 +1,6 @@
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Tracer } from '@aws-lambda-powertools/tracer';
-import { Metrics } from '@aws-lambda-powertools/metrics';
+import { Metrics,MetricUnits } from '@aws-lambda-powertools/metrics';
 
 const serviceName = process.env.POWERTOOLS_SERVICE_NAME || 'inventory-system';
 const isOffline = process.env.IS_OFFLINE === 'true';
@@ -23,3 +23,5 @@ export const metrics = new Metrics({
     namespace: 'InventoryNamespace',
     serviceName,
 });
+
+export { MetricUnits }
