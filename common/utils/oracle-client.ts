@@ -20,7 +20,7 @@ export const getOracleConnection = async () => {
             poolMax: 2
         };
 
-        console.log(`🔌 Connecting to Oracle (${isOffline ? 'OFFLINE' : 'CLOUD'})...`);
+        console.log(`Connecting to Oracle (${isOffline ? 'OFFLINE' : 'CLOUD'})...`);
         pool = await oracledb.createPool(dbConfig);
     }
     return pool.getConnection();

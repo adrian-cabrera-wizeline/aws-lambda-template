@@ -3,26 +3,22 @@
   "version": "1.0.0",
   "scripts": {
     "build": "node esbuild.config.js",
-    "test": "jest",
     "db:start": "docker-compose -f infra-local/docker-compose.yml up -d",
     "db:stop": "docker-compose -f infra-local/docker-compose.yml down",
     "db:seed": "npx ts-node infra-local/seed/seed-dynamo.ts",
+    "start:api": "sam local start-api -t infra-local/local-debug.yaml --warm-containers EAGER",
+    "test": "node scripts/test-runner.mjs",
     "dev:env": "npm run db:start && echo '⏳ Waiting for DBs...' && node -e \"setTimeout(() => {}, 10000)\" && npm run db:seed",
     "build:price": "esbuild functions/price-fetcher/src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/price-fetcher/handler.js --sourcemap",
     "build:config": "esbuild functions/config-service/src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/config-service/handler.js --sourcemap",
-    
     "invoke:price:create:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/create-product.json",
-    "invoke:price:create": "npm run invoke:price:create:raw 2>NUL | node common/scripts/format-response.js",
-
+    "invoke:price:create": "npm run invoke:price:create:raw 2>NUL | node scripts/format-response.js",
     "invoke:price:get:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/get-product.json",
-    "invoke:price:get": "npm run invoke:price:get:raw 2>NUL | node common/scripts/format-response.js",
-
+    "invoke:price:get": "npm run invoke:price:get:raw 2>NUL | node scripts/format-response.js",
     "invoke:price:update:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/update-price.json",
-    "invoke:price:update": "npm run invoke:price:update:raw 2>NUL | node common/scripts/format-response.js",
-
-    "// --- ⚙️ CONFIG SERVICE ACTIONS ---": "",
+    "invoke:price:update": "npm run invoke:price:update:raw 2>NUL | node scripts/format-response.js",
     "invoke:config:raw": "npm run build:config && sam local invoke ConfigServiceFunction -t infra-local/local-debug.yaml -e infra-local/events/config-test.json",
-    "invoke:config": "npm run invoke:config:raw 2>NUL | node common/scripts/format-response.js",
+    "invoke:config": "npm run invoke:config:raw 2>NUL | node scripts/format-response.js",
     "// --- 🔌 MODE SWITCHING (Optional) ---": "",
     "invoke:create:cloud": "sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/create-product.json --parameter-overrides IsOffline=false"
   },
@@ -45,12 +41,15 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^20.19.30",
     "@types/oracledb": "^6.10.1",
+    "chalk": "^5.6.2",
     "esbuild": "^0.27.2",
     "fx": "^39.2.0",
     "glob": "^10.3.3",
+    "inquirer": "^8.2.7",
     "jest": "^29.6.2",
     "pino-pretty": "^13.1.3",
-    "ts-jest": "^29.1.1",
+    "shelljs": "^0.10.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.1",
     "typescript": "^5.1.6"
   }
