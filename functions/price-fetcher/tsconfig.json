@@ -1,22 +1,18 @@
 {
+  // Inherit settings from root (so we don't repeat compilerOptions)
   "extends": "../../tsconfig.json",
+  
   "compilerOptions": {
-    "outDir": "../../dist/price-fetcher",
-    "baseUrl": ".",  
-    "target": "ES2022",
-    "moduleResolution": "node",
-    "strict": true,
-    "sourceMap": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true
+    // 🟢 FIX: Do NOT set "rootDir": "." 
+    // We let TS infer the root so it can handle ../../common files
+    "outDir": "./dist",
+    "noEmit": true // We use esbuild for bundling, tsc is just for checking
   },
+  
   "include": [
-    "src/**/*",
-    "../../common/**/*" // 👈 Explicitly allow the shared code
+    "src/**/*", 
+    "tests/**/*", 
+    "../../common/**/*" // 👈 Explicitly include the code you use
   ],
-  "exclude": [
-    "node_modules",
-    "**/*.test.ts"
-  ]
+  "exclude": ["node_modules", "dist"]
 }
