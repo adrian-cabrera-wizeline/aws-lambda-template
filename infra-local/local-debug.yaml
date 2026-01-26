@@ -1,12 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Local Debug Stack (Pre-Built Mode)
-
-Parameters:
-  IsOffline:
-    Type: String
-    Default: 'true'
-    AllowedValues: ['true', 'false']
+Description: Local Debug Stack (Points to Dist for Pipeline Parity)
 
 Globals:
   Function:
@@ -14,13 +8,14 @@ Globals:
     Timeout: 20
     Environment:
       Variables:
+        # Force "Offline" mode so code doesn't try X-Ray/CloudWatch
         POWERTOOLS_SERVICE_NAME: "monorepo-local"
-        LOG_LEVEL: "INFO" 
+        IS_OFFLINE: "true"
         AWS_SAM_LOCAL: "true"
 
 Resources:
   # ============================================================
-  # 1. SHARED RESOURCES
+  # 1. SHARED MOCKS (DynamoDB)
   # ============================================================
   AuditTable:
     Type: AWS::DynamoDB::Table
@@ -39,39 +34,33 @@ Resources:
           KeyType: RANGE
 
   # ============================================================
-  # 2. PRICE FETCHER (Points to Dist)
+  # 2. PRICE FETCHER
   # ============================================================
   PriceFetcherFunction:
     Type: AWS::Serverless::Function
     Properties:
-      # ⚠️ POINTS TO BUILT CODE
-      CodeUri: ../dist/price-fetcher
-      Handler: handler.handler
+      # CRITICAL: Point to the root 'dist' folder created by npm run build
+      CodeUri: ../dist
+      
+      # CRITICAL: Path to the handler file inside dist
+      # Original: functions/price-fetcher/src/handler.ts
+      # Compiled: functions/price-fetcher/src/handler.js
+      Handler: functions/price-fetcher/src/handler.handler
+      
+      Architectures:
+        - x86_64
+      
+      # Connects to Docker Network Services (Oracle & DynamoDB)
       Environment:
         Variables:
-          IS_OFFLINE: !Ref IsOffline
-          AUDIT_TABLE: !Ref AuditTable
-          ORACLE_CONN_STRING: "123.45.67.89:1521/XEPDB1" 
+          AUDIT_TABLE_NAME: !Ref AuditTable
+          # 'oracle-local' is the service name in docker-compose.yml
+          ORACLE_CONN_STRING: "oracle-local:1521/XEPDB1"
           ORACLE_USER: "app_user"
           ORACLE_PASSWORD: "password"
+          # 'dynamodb-local' is the service name in docker-compose.yml
+          DYNAMODB_ENDPOINT: "http://dynamodb-local:8000"
+      
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AuditTable
-
-  # ============================================================
-  # 3. CONFIG SERVICE (Points to Dist)
-  # ============================================================
-  ConfigServiceFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      # ⚠️ POINTS TO BUILT CODE
-      CodeUri: ../dist/config-service
-      Handler: handler.handler
-      Environment:
-        Variables:
-          IS_OFFLINE: !Ref IsOffline
-
-Outputs:
-  AuditTableName:
-    Description: "Local DynamoDB Table Name"
-    Value: !Ref AuditTable

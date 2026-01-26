@@ -1,26 +1,27 @@
 {
-  "name": "cloud-backend-monorepo",
+  "name": "lambda-backend-monorepo",
   "version": "1.0.0",
   "scripts": {
     "build": "node esbuild.config.js",
     "db:start": "docker-compose -f infra-local/docker-compose.yml up -d",
     "db:stop": "docker-compose -f infra-local/docker-compose.yml down",
     "db:seed": "npx ts-node infra-local/seed/seed-dynamo.ts",
-    "start:api": "sam local start-api -t infra-local/local-debug.yaml --warm-containers EAGER",
-    "test": "node scripts/test-runner.mjs",
+
     "dev:env": "npm run db:start && echo '⏳ Waiting for DBs...' && node -e \"setTimeout(() => {}, 10000)\" && npm run db:seed",
-    "build:price": "esbuild functions/price-fetcher/src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/price-fetcher/handler.js --sourcemap",
-    "build:config": "esbuild functions/config-service/src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/config-service/handler.js --sourcemap",
-    "invoke:price:create:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/create-product.json",
-    "invoke:price:create": "npm run invoke:price:create:raw 2>NUL | node scripts/format-response.js",
-    "invoke:price:get:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/get-product.json",
-    "invoke:price:get": "npm run invoke:price:get:raw 2>NUL | node scripts/format-response.js",
-    "invoke:price:update:raw": "npm run build:price && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/update-price.json",
-    "invoke:price:update": "npm run invoke:price:update:raw 2>NUL | node scripts/format-response.js",
-    "invoke:config:raw": "npm run build:config && sam local invoke ConfigServiceFunction -t infra-local/local-debug.yaml -e infra-local/events/config-test.json",
-    "invoke:config": "npm run invoke:config:raw 2>NUL | node scripts/format-response.js",
-    "// --- 🔌 MODE SWITCHING (Optional) ---": "",
-    "invoke:create:cloud": "sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e infra-local/events/create-product.json --parameter-overrides IsOffline=false"
+    
+    "test": "npx jest",
+    "test:runner": "node scripts/test-runner.mjs",
+    "test:unit": "npx jest --testPathPattern=src",
+
+    "----- LOCAL DEV (SAM Points to Dist) -----": "",
+    "// NOTE": "We build FIRST, then point SAM to the 'dist' folder to match Production behavior",
+
+    "local:api": "npm run build && sam local start-api -t infra-local/local-debug.yaml --env-vars env.json --docker-network infra-local_default --warm-containers EAGER",
+    "invoke:price:create": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/create.json --env-vars env.json --docker-network infra-local_default",
+    "invoke:price:get": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/read.json --env-vars env.json --docker-network infra-local_default",
+    "invoke:price:update": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/update-price.json --env-vars env.json --docker-network infra-local_default",
+    "invoke:price:delete": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/recall-product.json --env-vars env.json --docker-network infra-local_default"
+
   },
   "dependencies": {
     "@aws-lambda-powertools/logger": "^1.18.1",

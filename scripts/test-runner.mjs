@@ -7,90 +7,110 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '../'); 
+const projectRoot = path.join(__dirname, '../');
 
-const functionsDir = path.join(projectRoot, 'functions');
-let services = [];
-if (fs.existsSync(functionsDir)) {
-    services = fs.readdirSync(functionsDir).filter(file => {
-        try {
-            return fs.statSync(path.join(functionsDir, file)).isDirectory();
-        } catch (e) { return false; }
-    });
-}
+// Helper: Fix slashes for Windows (Jest requires forward slashes for patterns)
+const toJestPattern = (p) => p.replace(/\\/g, '/');
 
 async function main() {
-    console.log(chalk.blue.bold('\n🧪 Monorepo Test Runner (Windows Safe)\n'));
+    console.log(chalk.blue.bold('\n🧪 Monorepo Test Runner (Co-location Support)\n'));
+
+    // 1. Detect Services
+    const functionsDir = path.join(projectRoot, 'functions');
+    let services = [];
+    if (fs.existsSync(functionsDir)) {
+        services = fs.readdirSync(functionsDir).filter(f => 
+            fs.statSync(path.join(functionsDir, f)).isDirectory()
+        );
+    }
+
+    // 2. Detect Common (Fix: Use commonDir to conditionally add it)
+    const commonDir = path.join(projectRoot, 'common');
+    const hasCommon = fs.existsSync(commonDir);
+
+    // Build Menu Choices
+    const choices = [
+        { name: '🌎 All Services', value: 'ALL' },
+        new inquirer.Separator()
+    ];
+
+    if (hasCommon) {
+        choices.push({ name: '📚 Common Utils', value: 'common' });
+        choices.push(new inquirer.Separator());
+    }
+
+    services.forEach(s => {
+        choices.push({ name: '📦 ' + s, value: s });
+    });
 
     const { scope } = await inquirer.prompt([{
         type: 'list',
         name: 'scope',
-        message: 'Which service?',
-        choices: [
-            { name: '🌎 All Services', value: 'ALL' },
-            new inquirer.Separator(),
-            ...services.map(s => ({ name: `📦 ${s}`, value: s }))
-        ]
+        message: 'Which scope?',
+        choices: choices
     }]);
 
     const { testType } = await inquirer.prompt([{
         type: 'list',
         name: 'testType',
-        message: 'What scope?',
+        message: 'What kind of tests?',
         choices: [
-            { name: '⚡ Unit Tests', value: 'unit' },
+            { name: '⚡ Unit Tests (Co-located)', value: 'unit' },
             { name: '🐢 Integration Tests', value: 'integration' },
-            { name: '🚀 Everything', value: 'all' },
-            new inquirer.Separator(),
-            { name: '🎯 Specific File (Pattern without entering.test.ts)', value: 'file' }
+            { name: '🚀 Everything', value: 'all' }
         ]
     }]);
 
+    const jestBin = 'npx jest';
     let cmd = '';
-    const jestBin = 'npx jest'; 
+    let configPath = '';
+    let searchPattern = '';
 
-    // Convert Windows backslashes to Forward Slashes for Regex
-    const toJestPattern = (p) => p.replace(/\\/g, '/');
-
-    if (testType === 'file') {
-        const { pattern } = await inquirer.prompt([{
-            type: 'input',
-            name: 'pattern',
-            message: 'Filename pattern:',
-            validate: i => i.length > 0 ? true : 'Required'
-        }]);
-
-        if (scope === 'ALL') {
-            cmd = `${jestBin} functions -t "${pattern}"`;
-        } else {
-            // Path to config (System Path is fine here)
-            const configPath = path.join('functions', scope, 'jest.config.js');
-            // Search Pattern (Must be Forward Slash)
-            const searchPattern = toJestPattern(`functions/${scope}`);
-            
-            cmd = `${jestBin} -c "${configPath}" "${searchPattern}" -t "${pattern}"`;
-        }
-
-    } else {
-        const subFolder = testType === 'all' ? '' : testType;
+    // 3. Logic for "Common"
+    if (scope === 'common') {
+        configPath = path.join('common', 'jest.config.js');
         
-        if (scope === 'ALL') {
-             // Pattern: functions/*/tests/unit
-             const searchPattern = toJestPattern(`functions/*/tests/${subFolder}`);
-             cmd = `${jestBin} "${searchPattern}"`;
+        if (testType === 'unit') {
+            // Look for tests inside these specific folders in common
+            searchPattern = toJestPattern('common/(repositories|utils|middleware)'); 
+        } else if (testType === 'integration') {
+            searchPattern = toJestPattern('common/tests/integration');
         } else {
-            const configPath = path.join('functions', scope, 'jest.config.js');
-            
-            // "functions/price-fetcher/tests/unit"
-            const searchPattern = toJestPattern(`functions/${scope}/tests/${subFolder}`);
-            
-            console.log(chalk.cyan(`\nRunning ${testType} for ${scope}...`));
+            searchPattern = toJestPattern('common');
+        }
+    } 
+    // 4. Logic for "All"
+    else if (scope === 'ALL') {
+        cmd = `${jestBin} --passWithNoTests`; 
+    } 
+    // 5. Logic for Specific Lambda
+    else {
+        configPath = path.join('functions', scope, 'jest.config.js');
+        const servicePath = `functions/${scope}`;
+
+        if (testType === 'unit') {
+            // Look for tests in src (co-located) OR legacy tests/unit
+            searchPattern = toJestPattern(`${servicePath}/(src|tests/unit)`);
+        } else if (testType === 'integration') {
+            searchPattern = toJestPattern(`${servicePath}/tests/integration`);
+        } else {
+            searchPattern = toJestPattern(servicePath);
+        }
+    }
+
+    // 6. Build Command
+    if (scope !== 'ALL') {
+        // Fallback: Use root config if specific config is missing
+        if (!fs.existsSync(path.join(projectRoot, configPath))) {
+            console.log(chalk.yellow(`⚠️  Config ${configPath} not found, using default.`));
+            cmd = `${jestBin} "${searchPattern}"`;
+        } else {
             cmd = `${jestBin} -c "${configPath}" "${searchPattern}"`;
         }
     }
 
     console.log(chalk.dim(`> ${cmd}`));
-    shell.exec(cmd); 
+    shell.exec(cmd);
 }
 
 main();

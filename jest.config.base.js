@@ -4,8 +4,6 @@ module.exports = {
   
   transform: {
     '^.+\\.[tj]sx?$': ['ts-jest', {
-      // 🟢 FIX: Remove "isolatedModules: true" from here.
-      // We rely solely on the tsconfig to handle this now.
       tsconfig: '<rootDir>/tsconfig.json' 
     }]
   },
