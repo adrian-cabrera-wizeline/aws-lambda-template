@@ -1,9 +1,9 @@
-import { docClient } from '../../../common/utils/dynamodb-client'; // 👈 Hybrid Client
+import { docClient } from '../../../common/utils/dynamodb-client';
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
-import { logger } from '../../../common/utils/observability-tools'; // 👈 Powertools Logger
+import { logger } from '../../../common/utils/observability-tools';
 
 export class AuditRepository {
-    // Falls back to a default if env var is missing (safety)
+
     private tableName = process.env.AUDIT_TABLE || 'product-audit-trail';
 
     /**
@@ -30,7 +30,7 @@ export class AuditRepository {
                 }
             }));
         } catch (error) {
-            // 🚨 CRITICAL: If Audit Fails, we should arguably fail the whole transaction
+            // If Audit Fails, we should arguably fail the whole transaction
             // or alert heavily. For now, we log an error.
             logger.error('Failed to write Audit Log', { error: error as Error, entityId });
             throw error; // Re-throw to ensure the user knows something went wrong

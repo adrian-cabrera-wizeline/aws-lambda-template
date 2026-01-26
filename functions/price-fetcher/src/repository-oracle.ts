@@ -1,72 +1,82 @@
 import { getOracleConnection } from '../../../common/utils/oracle-client';
-import oracledb from 'oracledb';
+// 💡 LEARN: We import 'Connection' type for TS IntelliSense, and 'oracledb' for constants.
+import oracledb, { Connection } from 'oracledb';
 import { tracer } from '../../../common/utils/observability-tools';
-import { Product, OracleProductRow } from '../../../common/types'; // 👈 Shared Kernel Imports
+import { Product, OracleProductRow } from '../../../common/types';
 
 export class OracleRepository {
-    
+    // This holds the connection if provided by Middleware
+    private db?: Connection;
+
     /**
-     * 🟢 CREATE
-     * Inserts a new product. Status defaults to 'ACTIVE'.
+     * DEPENDENCY INJECTION
+     * @param db - Optional. If provided (by Middleware), we use it. 
+     * If missing (e.g., unit tests), we create a fresh one.
      */
-    @tracer.captureMethod() // Auto-instrumentation for X-Ray
+    constructor(db?: Connection) {
+        this.db = db;
+    }
+
+    @tracer.captureMethod()
     async create(id: string, name: string, price: number): Promise<void> {
-        const conn = await getOracleConnection();
+        // 💡 LEARN: Logic to decide "Do I own this connection?"
+        // If 'this.db' exists, Middleware owns it (don't close).
+        // If 'this.db' is missing, we open a new one (must close).
+        const shouldClose = !this.db;
+        const conn = this.db || await getOracleConnection();
+
         try {
             await conn.execute(
                 `INSERT INTO PRODUCTS (ID, NAME, PRICE, STATUS, UPDATED_AT) 
                  VALUES (:id, :name, :price, 'ACTIVE', SYSDATE)`,
                 { id, name, price },
-                { autoCommit: true }
+                { autoCommit: true } // AutoCommit is vital in 'Thin Mode' / Pools
             );
         } finally {
-            await conn.close();
+            // only close if we opened it ourselves. 
+            // If Middleware gave it to us, Middleware will close it later.
+            if (shouldClose) {
+                await conn.close();
+            }
         }
     }
 
-    /**
-     * 🔵 READ (Get By ID)
-     * Maps raw Oracle rows (UPPERCASE) to Domain Object (camelCase).
-     */
     @tracer.captureMethod()
     async getById(id: string): Promise<Product | null> {
-        const conn = await getOracleConnection();
+        const shouldClose = !this.db;
+        const conn = this.db || await getOracleConnection();
+
         try {
-            // We expect a row matching the OracleProductRow interface
             const result = await conn.execute<OracleProductRow>(
                 `SELECT ID, NAME, PRICE, STATUS, UPDATED_AT 
                  FROM PRODUCTS WHERE ID = :id`,
                 { id },
-                { outFormat: oracledb.OUT_FORMAT_OBJECT } // Returns { ID: '...', NAME: '...' }
+                { outFormat: oracledb.OUT_FORMAT_OBJECT } 
             );
             
-            const row = result.rows?.[0]; // Safe access
+            const row = result.rows?.[0]; 
             
             if (!row) return null;
 
-            // 🔄 THE MAPPER
-            // Decouples App Logic from DB Column Names
+            // MAPPER: DB (Upper) -> App (Camel)
             return {
                 id: row.ID,
                 name: row.NAME,
                 price: row.PRICE,
-                // Cast string to specific Union Type ('ACTIVE' | 'INACTIVE')
                 status: row.STATUS as Product['status'], 
                 updatedAt: row.UPDATED_AT
             };
 
         } finally {
-            await conn.close();
+            if (shouldClose) await conn.close();
         }
     }
 
-    /**
-     * 🟠 UPDATE (Price Only)
-     * Updates price and refreshes the UPDATED_AT timestamp.
-     */
     @tracer.captureMethod()
     async updatePrice(id: string, newPrice: number): Promise<void> {
-        const conn = await getOracleConnection();
+        const shouldClose = !this.db;
+        const conn = this.db || await getOracleConnection();
+
         try {
             await conn.execute(
                 `UPDATE PRODUCTS 
@@ -76,17 +86,15 @@ export class OracleRepository {
                 { autoCommit: true }
             );
         } finally {
-            await conn.close();
+            if (shouldClose) await conn.close();
         }
     }
 
-    /**
-     * 🔴 DELETE (Soft Delete)
-     * We NEVER delete data. We set status to INACTIVE.
-     */
     @tracer.captureMethod()
     async softDelete(id: string): Promise<void> {
-        const conn = await getOracleConnection();
+        const shouldClose = !this.db;
+        const conn = this.db || await getOracleConnection();
+
         try {
             await conn.execute(
                 `UPDATE PRODUCTS 
@@ -96,7 +104,7 @@ export class OracleRepository {
                 { autoCommit: true }
             );
         } finally {
-            await conn.close();
+            if (shouldClose) await conn.close();
         }
     }
 }
