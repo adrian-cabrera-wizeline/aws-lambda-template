@@ -1,37 +1,57 @@
-import { OracleRepository } from '../../src/repository-oracle';
-import { getOracleConnection } from '../../../../common/utils/oracle-client';
-import { v4 as uuidv4 } from 'uuid';
+import { ProductRepository } from '../../src/repository-oracle';
 
-describe('OracleRepository Integration', () => {
-    // We use a real connection logic here
-    const repo = new OracleRepository(); 
+// Mock Observability
+jest.mock('../../../common/utils/observability-tools', () => ({
+    tracer: { captureMethod: () => jest.fn() },
+    logger: { info: jest.fn() }
+}));
 
-    // Helper data
-    const testId = uuidv4();
-    const testName = 'Integration Test Product';
-    const testPrice = 150.00;
+describe('ProductRepository (Oracle)', () => {
+    let repo: ProductRepository;
+    let mockDb: any;
 
-    //CLEANUP: Close pool after all tests are done
-    afterAll(async () => {
-        const conn = await getOracleConnection();
-        await conn.close(); 
+    beforeEach(() => {
+        mockDb = { execute: jest.fn() };
+        repo = new ProductRepository(mockDb);
     });
 
-    test('Full Lifecycle: Create -> Read -> Update -> Soft Delete', async () => {
+    it('findById: should filter out DELETED items', async () => {
+        mockDb.execute.mockResolvedValue({ rows: [{ id: '123', name: 'Test' }] });
 
-        await repo.create(testId, testName, testPrice);
-        // 2. READ & VERIFY
-        const product = await repo.getById(testId);
-        expect(product).not.toBeNull();
-        expect(product?.name).toBe(testName);
-        expect(product?.status).toBe('ACTIVE');
+        await repo.findById('123');
 
-        await repo.updatePrice(testId, 199.99);
-        const updatedProduct = await repo.getById(testId);
-        expect(updatedProduct?.price).toBe(199.99);
+        // Verify SQL contains the soft-delete check
+        const sql = mockDb.execute.mock.calls[0][0];
+        expect(sql).toContain("status != 'DELETED'");
+        expect(mockDb.execute).toHaveBeenCalledWith(
+            expect.stringContaining('SELECT * FROM products'), 
+            { id: '123' }
+        );
+    });
 
-        await repo.softDelete(testId);
-        const deletedProduct = await repo.getById(testId);
-        expect(deletedProduct?.status).toBe('INACTIVE');
+    it('save: should insert correct columns', async () => {
+        const product: any = { 
+            id: '1', name: 'P1', price: 10, status: 'ACTIVE', 
+            createdAt: 'now', updatedAt: 'now' 
+        };
+
+        await repo.save(product);
+
+        const sql = mockDb.execute.mock.calls[0][0];
+        expect(sql).toContain('INSERT INTO products');
+        expect(mockDb.execute).toHaveBeenCalledWith(expect.any(String), product);
+    });
+
+    it('update: should update fields including status', async () => {
+        const product: any = { 
+            id: '1', name: 'P1 Updated', price: 20, 
+            status: 'ACTIVE', updatedAt: 'new-time' 
+        };
+
+        await repo.update(product);
+
+        const sql = mockDb.execute.mock.calls[0][0];
+        expect(sql).toContain('UPDATE products SET');
+        expect(sql).toContain('status = :status');
     });
 });

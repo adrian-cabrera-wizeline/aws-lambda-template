@@ -1,91 +1,94 @@
 import middy from '@middy/core';
-import httpJsonBodyParser from '@middy/http-json-body-parser';
+import jsonBodyParser from '@middy/http-json-body-parser';
 import httpErrorHandler from '@middy/http-error-handler';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { APIGatewayProxyEvent, Context } from 'aws-lambda';
 
-import { logger, metrics } from '../../../common/utils/observability-tools';
-import { withObservability } from '../../../common/middleware/observability';
+import { observabilityMiddleware } from '../../../common/middleware/observability';
 import { oracleMiddleware } from '../../../common/middleware/db-middy';
 
+import { tracer } from '../../../common/utils/observability-tools';
+import { AuditRepository } from '../../../common/repositories/audit-repository';
+
+// Domain Imports
 import { ProductService } from './service';
-import { 
-    CreateProductSchema, 
-    UpdatePriceSchema, 
-    ProductIdParamSchema 
-} from './dto';
-import { MetricResolution, MetricUnits } from '@aws-lambda-powertools/metrics';
-import { Context } from 'aws-lambda/handler';
+import { ProductRepository } from './repository-oracle';
+import { CreateProductSchema, UpdateProductSchema } from './schemas';
+import { ERRORS } from './constants';
 
-const getUserId = (event: APIGatewayProxyEvent): string => {
-    const auth = event.requestContext?.authorizer;
-    // Cognito (Standard)
-    if (auth?.claims?.sub) return auth.claims.sub;
-    // Custom Authorizer
-    if (auth?.principalId) return auth.principalId;
-    // Local Fallback (Optional, but helps prevent crashes during dev)
-    // You can remove this if you want to enforce auth strictly.
-    return "anonymous-dev-user";
-};
+// INFRASTRUCTURE (Warm Start Optimization)
 
+// Initialize these ONCE. They stay alive between requests.
+const ddbClient = tracer.captureAWSv3Client(new DynamoDBClient({}));
+const auditRepo = new AuditRepository(ddbClient, process.env.AUDIT_TABLE_NAME || 'AuditTable');
 
-const lambdaHandler = async (event: APIGatewayProxyEvent,context:Context) => {
-    const userId = getUserId(event);
-    const service = new ProductService(context.db);
-    // Add UserID to all logs for this request context
-    logger.appendKeys({ userId });
-    const method = event.httpMethod;
+// Service is cached so we don't re-instantiate logic on every call
+let service: ProductService;
 
-    // /product (Create)
-    if (method === 'POST') {
-        // Zod Parse: Throws 400 if body is invalid
-        const body = CreateProductSchema.parse(event.body);
-        const result = await service.createProduct(body.name, body.price, userId);
-        // Custom Metric
-        metrics.addMetric('ProductCreated', MetricUnits.Count, MetricResolution.High);
-        
-        return { statusCode: 201, body: JSON.stringify(result) };
+// HANDLER (The Adapter)
+const lambdaHandler = async (event: APIGatewayProxyEvent, context: Context) => {
+    // 1. Dependency Injection (Composition Root)
+    if (!service) {
+        // @ts-ignore: context.db is injected by oracleMiddleware
+        const productRepo = new ProductRepository(context.db);
+        service = new ProductService(productRepo, auditRepo);
     }
 
-    // /product (Update Price)
-    if (method === 'PUT') {
-        const body = UpdatePriceSchema.parse(event.body); 
-        const result = await service.updatePrice(body.id, body.price, userId);
-        metrics.addMetric('PriceUpdates', MetricUnits.Count, MetricResolution.High);
-        
-        return { statusCode: 200, body: JSON.stringify(result) };
-    }
+    const { httpMethod, body, queryStringParameters } = event;
+    const user = event.requestContext.authorizer?.claims?.sub || 'anonymous';
+    const id = queryStringParameters?.id;
 
-    // /product?id=... (Recall)
-    if (method === 'DELETE') {
-        // Validate Query Params
-        const params = ProductIdParamSchema.parse(event.queryStringParameters);
-        const result = await service.recallProduct(params.id, "Manual API Recall", userId);
-        metrics.addMetric('ProductRecalls', MetricUnits.Count, MetricResolution.High);
-        
-        return { statusCode: 200, body: JSON.stringify(result) };
-    }
-
-    // /product?id=... (Read)
-    if (method === 'GET') {
-        const params = ProductIdParamSchema.parse(event.queryStringParameters);
-        try {
-            const result = await service.getProduct(params.id);
-            return { statusCode: 200, body: JSON.stringify(result) };
-        } catch (error) {
-            return { statusCode: 404, body: JSON.stringify({ message: "Product not found" }) };
+    try {
+        if (httpMethod === 'POST') {
+            // Strict Validation (Zod)
+            const input = CreateProductSchema.parse(body);
+            const result = await service.createProduct(user, input);
+            return { statusCode: 201, body: JSON.stringify(result) };
         }
+
+        if (httpMethod === 'GET') {
+            if (!id) throw new Error(ERRORS.MISSING_ID);
+            const result = await service.getProduct(id);
+            return { statusCode: 200, body: JSON.stringify(result) };
+        }
+
+        if (httpMethod === 'PUT') {
+            if (!id) throw new Error(ERRORS.MISSING_ID);
+            // Partial Update Validation
+            const input = UpdateProductSchema.parse(body);
+            const result = await service.updateProduct(user, id, input);
+            return { statusCode: 200, body: JSON.stringify(result) };
+        }
+
+        if (httpMethod === 'DELETE') {
+            if (!id) throw new Error(ERRORS.MISSING_ID);
+            await service.deleteProduct(user, id);
+            return { statusCode: 204, body: '' }; // 204 = No Content
+        }
+
+    } catch (e: any) {
+        // Error Mapping: Translate Domain Errors to HTTP Status Codes
+        if (e.message === ERRORS.PRODUCT_NOT_FOUND) {
+            return { statusCode: 404, body: JSON.stringify({ message: e.message }) };
+        }
+        if (e.message === ERRORS.MISSING_ID || e.message === ERRORS.ALREADY_DELETED) {
+            return { statusCode: 400, body: JSON.stringify({ message: e.message }) };
+        }
+        // If it's a Zod Error or unknown, throw it. 
+        // httpErrorHandler will catch it and return 400 (Zod) or 500.
+        throw e;
     }
 
-    return { statusCode: 405, body: JSON.stringify({ message: "Method Not Allowed" }) };
+    return { statusCode: 404, body: JSON.stringify({ message: 'Route Not Found' }) };
 };
 
-// THE MIDDLEWARE CHAIN
-// 1. withObservability: Adds Logger, Tracer, Metrics
-// 2. httpJsonBodyParser: Parses JSON string to Object
-// 3. httpErrorHandler: Catches Zod errors (400) and Runtime errors (500)
-export const handler = withObservability(
-    middy(lambdaHandler)
-        .use(oracleMiddleware())
-        .use(httpJsonBodyParser())
-        .use(httpErrorHandler())
-);
+
+export const handler = middy(lambdaHandler)
+    // Observability (Tracer, Metrics, Logger) - Array Spread
+    .use(observabilityMiddleware()) 
+    // Database Injection
+    .use(oracleMiddleware())
+    // Request Parsing
+    .use(jsonBodyParser())
+    // Error Handling (Last safety net)
+    .use(httpErrorHandler());

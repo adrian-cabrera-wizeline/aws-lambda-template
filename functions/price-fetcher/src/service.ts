@@ -1,89 +1,99 @@
-import { Connection } from 'oracledb';
-import { OracleRepository } from './repository-oracle';
-import { AuditRepository } from './repository-audit';
-import { v4 as uuidv4 } from 'uuid';
-import { logger } from '../../../common/utils/observability-tools';
-import { Product } from '../../../common/types';
+import { ProductRepository } from './repository-oracle';
+import { AuditRepository } from '../../../common/repositories/audit-repository';
+import { CreateProductInput, UpdateProductInput, Product } from './schemas';
+import { createProduct, updateProduct, markAsDeleted } from './product.domain';
+import { logger, metrics, MetricUnits, tracer } from '../../../common/utils/observability-tools';
+import { ERRORS } from './constants';
 
 export class ProductService {
-    private oracle: OracleRepository;
-    private audit: AuditRepository;
+    constructor(
+        private productRepo: ProductRepository,
+        private auditRepo: AuditRepository
+    ) {}
 
-    /**
-     * DEPENDENCY INJECTION
-     * We allow the Handler to pass in the Shared DB Connection.
-     */
-    constructor(dbConnection?: Connection) {
-        // 💡 LEARN: Pass the connection DOWN to the repository.
-        // Now the repository will use this specific connection 
-        // instead of opening a new one.
-        this.oracle = new OracleRepository(dbConnection);
+    // --- 1. CREATE ---
+    @tracer.captureMethod()
+    async createProduct(user: string, input: CreateProductInput): Promise<Product> {
+        // 1. Logic
+        const product = createProduct(input);
 
-        // Audit usually writes to DynamoDB (HTTP), so it doesn't need Oracle connection
-        this.audit = new AuditRepository();
+        // 2. Persist
+        await this.productRepo.save(product);
+
+        // 3. Audit
+        await this.auditRepo.log({
+            entityId: product.id,
+            action: 'CREATE',
+            performedBy: user,
+            timestamp: product.createdAt,
+            details: { name: product.name, price: product.price }
+        });
+
+        // 4. Metrics
+        metrics.addMetric('ProductCreated', MetricUnits.Count, 1);
+        
+        return product;
     }
-    /*
-     * Journey: Insert into Oracle -> Log 'CREATE' in DynamoDB
-    */
-    async createProduct(name: string, price: number, userId: string) {
-        const newId = uuidv4();
 
-        logger.info("Service: Creating Product", { newId, name });
-
-        // Write State (Uses Injected Connection)
-        await this.oracle.create(newId, name, price);
-
-        // Write Audit
-        await this.audit.logChange(userId, 'CREATE', newId, { name, price });
-
-        return { id: newId, status: 'created' };
-    }
-    /**
-     * Journey: Fetch Old Price -> Update Oracle -> Log 'UPDATE' with Delta
-    */
-    async updatePrice(id: string, newPrice: number, userId: string) {
-        // 1. Fetch Current (Uses Injected Connection)
-        const current = await this.oracle.getById(id);
-
-        if (!current) {
-            logger.warn("Update failed: Product not found", { id });
-            throw new Error("Product Not Found");
+    // --- 2. READ ---
+    @tracer.captureMethod()
+    async getProduct(id: string): Promise<Product> {
+        const product = await this.productRepo.findById(id);
+        
+        if (!product) {
+            logger.warn('Product not found during fetch', { id });
+            throw new Error(ERRORS.PRODUCT_NOT_FOUND);
         }
 
-        // 2. Perform Update (Uses SAME Connection)
-        await this.oracle.updatePrice(id, newPrice);
+        return product;
+    }
 
-        // 3. Log Delta
-        await this.audit.logChange(userId, 'UPDATE', id, {
-            field: 'price',
-            oldPrice: current.price,
-            newPrice: newPrice
+    // --- 3. UPDATE ---
+    @tracer.captureMethod()
+    async updateProduct(user: string, id: string, input: UpdateProductInput): Promise<Product> {
+        // Fetch current state
+        const current = await this.getProduct(id);
+
+        // Apply Pure Logic (Checks business rules like "Is it deleted?")
+        const updated = updateProduct(current, input);
+
+        // Persist
+        await this.productRepo.update(updated);
+
+        // Audit
+        await this.auditRepo.log({
+            entityId: id,
+            action: 'UPDATE',
+            performedBy: user,
+            timestamp: updated.updatedAt,
+            details: { changes: input, oldPrice: current.price }
         });
 
-        return { id, status: 'updated' };
+        metrics.addMetric('ProductUpdated', MetricUnits.Count, 1);
+        
+        return updated;
     }
-    /**
-     * Journey: Soft Delete in Oracle -> Log 'DEACTIVATE' in DynamoDB
-     */
-    async recallProduct(id: string, reason: string, userId: string) {
-        const current = await this.oracle.getById(id);
-        if (!current) throw new Error("Product Not Found");
 
-        await this.oracle.softDelete(id);
+    // --- 4. DELETE (Soft) ---
+    @tracer.captureMethod()
+    async deleteProduct(user: string, id: string): Promise<void> {
+        const current = await this.getProduct(id);
 
-        await this.audit.logChange(userId, 'DEACTIVATE', id, {
-            reason: reason,
-            previousStatus: current.status
+        // Apply Soft Delete Logic
+        const deleted = markAsDeleted(current);
+
+        // Update the record status
+        await this.productRepo.update(deleted);
+
+        // Audit
+        await this.auditRepo.log({
+            entityId: id,
+            action: 'DELETE',
+            performedBy: user,
+            timestamp: deleted.updatedAt,
+            details: { type: 'Soft Delete' }
         });
 
-        return { id, status: 'inactive' };
-    }
-    /**
-   * Journey: Read from Oracle
-   */
-    async getProduct(id: string): Promise<Product> {
-        const p = await this.oracle.getById(id);
-        if (!p) throw new Error("Product Not Found");
-        return p;
+        metrics.addMetric('ProductDeleted', MetricUnits.Count, 1);
     }
 }
