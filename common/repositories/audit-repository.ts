@@ -42,9 +42,6 @@ export class AuditRepository {
             // For Audits, we typically don't want to crash the user's transaction if the audit DB is down,
             // BUT we must alert an Admin immediately.
             logger.error('CRITICAL: Failed to write audit log', { error, entry });
-            
-            // Note: If strict compliance is required (e.g. Banking), you might want to throw here.
-            // throw new Error("Audit Failure"); 
         }
     }
 }

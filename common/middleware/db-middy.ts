@@ -4,7 +4,7 @@ import { Connection } from 'oracledb';
 import { getOracleConnection } from '../utils/oracle-client';
 import { logger } from '../utils/observability-tools'; // Correct import
 
-// 🛠️ TYPE DEFINITION: Extend the default Lambda Context
+// TYPE DEFINITION: Extend the default Lambda Context
 declare module 'aws-lambda' {
   export interface Context {
     db?: Connection; // Adds 'db' to the global Context type

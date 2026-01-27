@@ -3,8 +3,20 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { logger } from '../utils/observability-tools';
 
-jest.mock('@aws-sdk/lib-dynamodb');
-jest.mock('../../utils/observability-tools', () => ({
+// 🟢 FIX: Partial Mock using requireActual
+// We keep PutCommand REAL so 'command.input' exists. 
+// We only mock the DocumentClient factory.
+jest.mock('@aws-sdk/lib-dynamodb', () => {
+    const actual = jest.requireActual('@aws-sdk/lib-dynamodb');
+    return {
+        ...actual,
+        DynamoDBDocumentClient: {
+            from: jest.fn(), // We hijack this
+        },
+    };
+});
+
+jest.mock('../utils/observability-tools', () => ({
     logger: { debug: jest.fn(), error: jest.fn() }
 }));
 
@@ -14,9 +26,14 @@ describe('AuditRepository (Unit)', () => {
 
     beforeEach(() => {
         const mockClient = new DynamoDBClient({});
-        // Mock the .send() method of the DocumentClient
+        
+        // 1. Create the mock 'send' function
         mockSend = jest.fn();
-        (DynamoDBDocumentClient.from as jest.Mock).mockReturnValue({ send: mockSend });
+
+        // 2. Configure the mocked .from() to return our mock client
+        (DynamoDBDocumentClient.from as jest.Mock).mockReturnValue({ 
+            send: mockSend 
+        });
 
         repo = new AuditRepository(mockClient, 'TestAuditTable');
         jest.clearAllMocks();
@@ -34,14 +51,17 @@ describe('AuditRepository (Unit)', () => {
         await repo.log(entry);
 
         expect(mockSend).toHaveBeenCalledTimes(1);
-        // Verify the command arguments
+        
+        // 🟢 VERIFICATION:
+        // Because PutCommand is now real, 'command.input' is populated correctly.
         const command = mockSend.mock.calls[0][0] as PutCommand;
+        
         expect(command.input.TableName).toBe('TestAuditTable');
         expect(command.input.Item).toEqual(expect.objectContaining({
             PK: 'AUDIT#product-123',
             SK: '2023-01-01T12:00:00Z',
             action: 'CREATE',
-            ttl: expect.any(Number) // Ensure TTL was added
+            ttl: expect.any(Number) // Ensure TTL was calculated and added
         }));
     });
 
@@ -56,8 +76,10 @@ describe('AuditRepository (Unit)', () => {
             details: {}
         };
 
+        // Should NOT throw
         await expect(repo.log(entry)).resolves.not.toThrow();
 
+        // Should Log Error
         expect(logger.error).toHaveBeenCalledWith(
             expect.stringContaining('CRITICAL'), 
             expect.objectContaining({ error: expect.any(Error) })

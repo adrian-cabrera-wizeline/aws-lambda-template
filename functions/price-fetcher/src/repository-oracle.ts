@@ -14,7 +14,7 @@ export class ProductRepository {
 
     @tracer.captureMethod()
     async findById(id: string): Promise<Product | null> {
-        // 🟢 JOURNEY: User wants to check a price.
+        // JOURNEY: User wants to check a price.
         // We must ONLY return non-deleted items.
         const result = await this.dbConnection.execute(
             "SELECT * FROM products WHERE id = :id AND status != 'DELETED'", 

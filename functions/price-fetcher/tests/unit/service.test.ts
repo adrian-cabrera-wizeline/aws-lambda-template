@@ -1,7 +1,6 @@
 import { ProductService } from '../../src/service';
 import { ERRORS } from '../../src/constants';
 
-// 🎭 Mocks
 const mockRepo = {
     save: jest.fn(),
     findById: jest.fn(),
@@ -10,8 +9,7 @@ const mockRepo = {
 };
 const mockAudit = { log: jest.fn() };
 
-// Mock Observability Tools
-jest.mock('../../../common/utils/observability-tools', () => ({
+jest.mock('../../../../common/utils/observability-tools', () => ({
     metrics: { addMetric: jest.fn() },
     logger: { warn: jest.fn(), info: jest.fn() },
     tracer: { captureMethod: () => jest.fn() }, // Decorator mock
@@ -33,17 +31,17 @@ describe('ProductService', () => {
 
             const result = await service.createProduct(user, input);
 
-            // 1. Check Return
+            // Check Return
             expect(result).toMatchObject({
                 name: 'Test Item',
                 price: 100,
                 status: 'ACTIVE'
             });
 
-            // 2. Check Persistence
+            // Check Persistence
             expect(mockRepo.save).toHaveBeenCalledWith(result);
 
-            // 3. Check Audit
+            // Check Audit
             expect(mockAudit.log).toHaveBeenCalledWith(expect.objectContaining({
                 action: 'CREATE',
                 entityId: result.id,

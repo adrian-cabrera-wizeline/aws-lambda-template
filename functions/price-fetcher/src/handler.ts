@@ -25,9 +25,8 @@ const auditRepo = new AuditRepository(ddbClient, process.env.AUDIT_TABLE_NAME ||
 // Service is cached so we don't re-instantiate logic on every call
 let service: ProductService;
 
-// HANDLER (The Adapter)
 const lambdaHandler = async (event: APIGatewayProxyEvent, context: Context) => {
-    // 1. Dependency Injection (Composition Root)
+    // Dependency Injection (Composition Root)
     if (!service) {
         // @ts-ignore: context.db is injected by oracleMiddleware
         const productRepo = new ProductRepository(context.db);

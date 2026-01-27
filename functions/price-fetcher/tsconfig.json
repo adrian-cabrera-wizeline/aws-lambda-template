@@ -3,7 +3,6 @@
   "extends": "../../tsconfig.json",
   
   "compilerOptions": {
-    // 🟢 FIX: Do NOT set "rootDir": "." 
     // We let TS infer the root so it can handle ../../common files
     "outDir": "./dist",
     "noEmit": true // We use esbuild for bundling, tsc is just for checking
@@ -12,7 +11,7 @@
   "include": [
     "src/**/*", 
     "tests/**/*", 
-    "../../common/**/*" // 👈 Explicitly include the code you use
+    "../../common/**/*" // Explicitly include the code you use
   ],
   "exclude": ["node_modules", "dist"]
 }

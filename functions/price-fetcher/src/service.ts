@@ -11,16 +11,12 @@ export class ProductService {
         private auditRepo: AuditRepository
     ) {}
 
-    // --- 1. CREATE ---
     @tracer.captureMethod()
     async createProduct(user: string, input: CreateProductInput): Promise<Product> {
-        // 1. Logic
         const product = createProduct(input);
 
-        // 2. Persist
         await this.productRepo.save(product);
 
-        // 3. Audit
         await this.auditRepo.log({
             entityId: product.id,
             action: 'CREATE',
@@ -29,13 +25,11 @@ export class ProductService {
             details: { name: product.name, price: product.price }
         });
 
-        // 4. Metrics
         metrics.addMetric('ProductCreated', MetricUnits.Count, 1);
         
         return product;
     }
 
-    // --- 2. READ ---
     @tracer.captureMethod()
     async getProduct(id: string): Promise<Product> {
         const product = await this.productRepo.findById(id);
@@ -48,19 +42,15 @@ export class ProductService {
         return product;
     }
 
-    // --- 3. UPDATE ---
     @tracer.captureMethod()
     async updateProduct(user: string, id: string, input: UpdateProductInput): Promise<Product> {
         // Fetch current state
         const current = await this.getProduct(id);
-
         // Apply Pure Logic (Checks business rules like "Is it deleted?")
         const updated = updateProduct(current, input);
 
-        // Persist
         await this.productRepo.update(updated);
 
-        // Audit
         await this.auditRepo.log({
             entityId: id,
             action: 'UPDATE',
@@ -74,18 +64,15 @@ export class ProductService {
         return updated;
     }
 
-    // --- 4. DELETE (Soft) ---
+    // --- DELETE (Soft) ---
     @tracer.captureMethod()
     async deleteProduct(user: string, id: string): Promise<void> {
         const current = await this.getProduct(id);
-
-        // Apply Soft Delete Logic
+        
         const deleted = markAsDeleted(current);
 
-        // Update the record status
         await this.productRepo.update(deleted);
 
-        // Audit
         await this.auditRepo.log({
             entityId: id,
             action: 'DELETE',

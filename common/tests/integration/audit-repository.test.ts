@@ -2,7 +2,7 @@ import { AuditRepository } from '../../repositories/audit-repository';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 
-// ⚙️ SETUP: Connect to Localstack or Real AWS
+// SETUP: Connect to Localstack or Real AWS
 // (Ensure your terminal has AWS credentials or AWS_REGION set)
 const TABLE_NAME = process.env.AUDIT_TABLE_NAME || 'AuditTable';
 const client = new DynamoDBClient({
@@ -24,7 +24,7 @@ describe('AuditRepository (Integration)', () => {
             const timestamp = new Date().toISOString();
             const id = `test-integration-${Date.now()}`;
 
-            // 1. Write
+            // Write
             await repo.log({
                 entityId: id,
                 action: 'UPDATE',
@@ -33,7 +33,7 @@ describe('AuditRepository (Integration)', () => {
                 details: { test: true }
             });
 
-            // 2. Read Back (Verification)
+            // Read Back (Verification)
             const result = await docClient.send(new GetCommand({
                 TableName: TABLE_NAME,
                 Key: {

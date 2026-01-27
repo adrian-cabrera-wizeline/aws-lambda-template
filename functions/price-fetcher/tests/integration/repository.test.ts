@@ -1,7 +1,6 @@
 import { ProductRepository } from '../../src/repository-oracle';
 
-// Mock Observability
-jest.mock('../../../common/utils/observability-tools', () => ({
+jest.mock('../../../../common/utils/observability-tools', () => ({
     tracer: { captureMethod: () => jest.fn() },
     logger: { info: jest.fn() }
 }));
