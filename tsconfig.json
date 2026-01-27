@@ -16,7 +16,6 @@
     },
     "types": ["node", "aws-lambda", "jest"]
   },
-  // 🟢 FIX: Include EVERYTHING. This makes VS Code happy.
   "include": ["**/*"],
   "exclude": ["node_modules", "dist", ".aws-sam", "cdk.out"]
 }

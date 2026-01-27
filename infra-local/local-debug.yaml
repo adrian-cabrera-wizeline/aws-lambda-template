@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Local Debug Stack (Points to Dist for Pipeline Parity)
+Description: Local Debug Stack (Points to Dist)
 
 Globals:
   Function:
@@ -8,14 +8,13 @@ Globals:
     Timeout: 20
     Environment:
       Variables:
-        # Force "Offline" mode so code doesn't try X-Ray/CloudWatch
         POWERTOOLS_SERVICE_NAME: "monorepo-local"
         IS_OFFLINE: "true"
         AWS_SAM_LOCAL: "true"
 
 Resources:
   # ============================================================
-  # 1. SHARED MOCKS (DynamoDB)
+  # 1. SHARED RESOURCES (DynamoDB)
   # ============================================================
   AuditTable:
     Type: AWS::DynamoDB::Table
@@ -39,28 +38,28 @@ Resources:
   PriceFetcherFunction:
     Type: AWS::Serverless::Function
     Properties:
-      # CRITICAL: Point to the root 'dist' folder created by npm run build
+      # Points to the built code
       CodeUri: ../dist
-      
-      # CRITICAL: Path to the handler file inside dist
-      # Original: functions/price-fetcher/src/handler.ts
-      # Compiled: functions/price-fetcher/src/handler.js
       Handler: functions/price-fetcher/src/handler.handler
       
       Architectures:
         - x86_64
       
-      # Connects to Docker Network Services (Oracle & DynamoDB)
       Environment:
         Variables:
           AUDIT_TABLE_NAME: !Ref AuditTable
-          # 'oracle-local' is the service name in docker-compose.yml
           ORACLE_CONN_STRING: "oracle-local:1521/XEPDB1"
-          ORACLE_USER: "app_user"
-          ORACLE_PASSWORD: "password"
-          # 'dynamodb-local' is the service name in docker-compose.yml
           DYNAMODB_ENDPOINT: "http://dynamodb-local:8000"
       
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AuditTable
+
+      # The API Gateway Trigger
+      # Without this, 'sam local start-api' doesn't know what URL maps to this lambda
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /product
+            Method: ANY

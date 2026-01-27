@@ -7,110 +7,138 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '../');
+const projectRoot = path.resolve(__dirname, '../');
 
-// Helper: Fix slashes for Windows (Jest requires forward slashes for patterns)
-const toJestPattern = (p) => p.replace(/\\/g, '/');
+const forceForwardSlash = (p) => p.replace(/\\/g, '/');
 
 async function main() {
-    console.log(chalk.blue.bold('\n🧪 Monorepo Test Runner (Co-location Support)\n'));
+    console.log(chalk.blue.bold('\n🧪 Monorepo Test Runner (Fixed)\n'));
 
-    // 1. Detect Services
+    // --- STEP 1: DISCOVER PROJECTS ---
     const functionsDir = path.join(projectRoot, 'functions');
-    let services = [];
+    const commonDir = path.join(projectRoot, 'common');
+    
+    let lambdas = [];
     if (fs.existsSync(functionsDir)) {
-        services = fs.readdirSync(functionsDir).filter(f => 
+        lambdas = fs.readdirSync(functionsDir).filter(f => 
             fs.statSync(path.join(functionsDir, f)).isDirectory()
         );
     }
 
-    // 2. Detect Common (Fix: Use commonDir to conditionally add it)
-    const commonDir = path.join(projectRoot, 'common');
-    const hasCommon = fs.existsSync(commonDir);
-
-    // Build Menu Choices
-    const choices = [
-        { name: '🌎 All Services', value: 'ALL' },
+    const scopeChoices = [
+        { name: '🌎 All Projects', value: 'ALL' },
         new inquirer.Separator()
     ];
 
-    if (hasCommon) {
-        choices.push({ name: '📚 Common Utils', value: 'common' });
-        choices.push(new inquirer.Separator());
+    if (fs.existsSync(commonDir)) {
+        scopeChoices.push({ name: '📚 Common (Shared Utils)', value: 'common' });
     }
-
-    services.forEach(s => {
-        choices.push({ name: '📦 ' + s, value: s });
+    
+    lambdas.forEach(name => {
+        scopeChoices.push({ name: `📦 ${name}`, value: `functions/${name}` });
     });
 
-    const { scope } = await inquirer.prompt([{
-        type: 'list',
-        name: 'scope',
-        message: 'Which scope?',
-        choices: choices
-    }]);
+    // --- STEP 2: INTERACTIVE MENU ---
+    const answers = await inquirer.prompt([
+        {
+            type: 'list',
+            name: 'scope',
+            message: 'Where do you want to run tests?',
+            choices: scopeChoices,
+            pageSize: 12
+        },
+        {
+            type: 'list',
+            name: 'type',
+            message: 'Which test scope?',
+            choices: [
+                { name: '⚡ Unit Tests', value: 'unit' },
+                { name: '🐢 Integration Tests', value: 'integration' },
+                { name: '🚀 Everything in this folder', value: 'recursive' }
+            ],
+            when: (ans) => ans.scope !== 'ALL'
+        },
+        {
+            type: 'confirm',
+            name: 'usePattern',
+            message: 'Filter by filename pattern?',
+            default: false
+        },
+        {
+            type: 'input',
+            name: 'pattern',
+            message: 'Enter pattern (e.g. "audit" or "service"):',
+            when: (ans) => ans.usePattern,
+            validate: (input) => input ? true : 'Pattern cannot be empty'
+        }
+    ]);
 
-    const { testType } = await inquirer.prompt([{
-        type: 'list',
-        name: 'testType',
-        message: 'What kind of tests?',
-        choices: [
-            { name: '⚡ Unit Tests (Co-located)', value: 'unit' },
-            { name: '🐢 Integration Tests', value: 'integration' },
-            { name: '🚀 Everything', value: 'all' }
-        ]
-    }]);
-
+    // --- STEP 3: CONSTRUCT COMMAND ---
     const jestBin = 'npx jest';
-    let cmd = '';
-    let configPath = '';
-    let searchPattern = '';
+    let cmdArgs = [];
+    let pathFilter = '';
 
-    // 3. Logic for "Common"
-    if (scope === 'common') {
-        configPath = path.join('common', 'jest.config.js');
-        
-        if (testType === 'unit') {
-            // Look for tests inside these specific folders in common
-            searchPattern = toJestPattern('common/(repositories|utils|middleware)'); 
-        } else if (testType === 'integration') {
-            searchPattern = toJestPattern('common/tests/integration');
-        } else {
-            searchPattern = toJestPattern('common');
-        }
+    // A. Handle "All Projects"
+    if (answers.scope === 'ALL') {
+        // 🟢 FIX: Do NOT pass --passWithNoTests argument blindly.
+        // The root jest.config.js will now handle the project discovery.
+        // We just run 'npx jest' and let the 'projects' array do the work.
     } 
-    // 4. Logic for "All"
-    else if (scope === 'ALL') {
-        cmd = `${jestBin} --passWithNoTests`; 
-    } 
-    // 5. Logic for Specific Lambda
+    // B. Handle Specific Project
     else {
-        configPath = path.join('functions', scope, 'jest.config.js');
-        const servicePath = `functions/${scope}`;
+        // 1. Point to the SPECIFIC config
+        const targetConfig = path.join(projectRoot, answers.scope, 'jest.config.js');
+        if (fs.existsSync(targetConfig)) {
+            cmdArgs.push(`-c "${targetConfig}"`);
+        }
+        
+        // 2. Set the base path
+        pathFilter = answers.scope; 
+    }
 
-        if (testType === 'unit') {
-            // Look for tests in src (co-located) OR legacy tests/unit
-            searchPattern = toJestPattern(`${servicePath}/(src|tests/unit)`);
-        } else if (testType === 'integration') {
-            searchPattern = toJestPattern(`${servicePath}/tests/integration`);
+    // C. Handle Test Type
+    if (answers.scope !== 'ALL') {
+        if (answers.type === 'unit') {
+            if (answers.scope === 'common') {
+                // 🟢 FIX: Explicitly include 'repositories' and 'utils' for Common Unit tests
+                pathFilter = path.join(pathFilter, '(src|repositories|utils|middleware|tests/unit)');
+            } else {
+                pathFilter = path.join(pathFilter, '(src|tests/unit)');
+            }
+        } 
+        else if (answers.type === 'integration') {
+            // 🟢 FIX: Ensure we target the 'tests/integration' folder
+            pathFilter = path.join(pathFilter, 'tests/integration');
+        } 
+    }
+
+    // D. Format Regex
+    let finalRegex = '';
+    if (pathFilter) {
+        finalRegex = forceForwardSlash(pathFilter);
+    }
+
+    if (answers.usePattern && answers.pattern) {
+        // Combine path and user pattern
+        if (finalRegex) {
+            finalRegex = `${finalRegex}.*${answers.pattern}`;
         } else {
-            searchPattern = toJestPattern(servicePath);
+            finalRegex = answers.pattern;
         }
     }
 
-    // 6. Build Command
-    if (scope !== 'ALL') {
-        // Fallback: Use root config if specific config is missing
-        if (!fs.existsSync(path.join(projectRoot, configPath))) {
-            console.log(chalk.yellow(`⚠️  Config ${configPath} not found, using default.`));
-            cmd = `${jestBin} "${searchPattern}"`;
-        } else {
-            cmd = `${jestBin} -c "${configPath}" "${searchPattern}"`;
-        }
+    if (finalRegex) {
+        cmdArgs.push(`--testPathPattern="${finalRegex}"`);
     }
 
-    console.log(chalk.dim(`> ${cmd}`));
-    shell.exec(cmd);
+    // --- STEP 4: EXECUTE ---
+    // Add --passWithNoTests to prevent failure if a folder is empty
+    const finalCmd = `${jestBin} ${cmdArgs.join(' ')} --passWithNoTests --colors`;
+    
+    console.log(chalk.dim('\n> Regex:'), chalk.yellow(finalRegex || '(None)'));
+    console.log(chalk.dim('> Cmd:  '), chalk.cyan(finalCmd));
+    
+    shell.exec(finalCmd);
 }
 
 main();

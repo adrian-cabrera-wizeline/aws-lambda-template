@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.base.json", 
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../dist/common",
+    "types": ["node", "jest"],
+    "composite": true,
+          "isolatedModules": true
+  },
+  "include": [
+    "**/*"
+  ],
+  "exclude": [
+    "node_modules", 
+    "dist"
+  ]
+}

@@ -2,7 +2,6 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
-    // 🟢 CRITICAL: This must be here for ts-jest to be happy
     "isolatedModules": true, 
     "allowJs": true,
     "strict": true,
