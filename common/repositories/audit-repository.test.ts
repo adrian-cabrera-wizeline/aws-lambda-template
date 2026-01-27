@@ -3,9 +3,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { logger } from '../utils/observability-tools';
 
-// 🟢 FIX: Partial Mock using requireActual
 // We keep PutCommand REAL so 'command.input' exists. 
-// We only mock the DocumentClient factory.
 jest.mock('@aws-sdk/lib-dynamodb', () => {
     const actual = jest.requireActual('@aws-sdk/lib-dynamodb');
     return {
@@ -27,10 +25,9 @@ describe('AuditRepository (Unit)', () => {
     beforeEach(() => {
         const mockClient = new DynamoDBClient({});
         
-        // 1. Create the mock 'send' function
         mockSend = jest.fn();
 
-        // 2. Configure the mocked .from() to return our mock client
+        // Configure the mocked .from() to return our mock client
         (DynamoDBDocumentClient.from as jest.Mock).mockReturnValue({ 
             send: mockSend 
         });
@@ -52,7 +49,7 @@ describe('AuditRepository (Unit)', () => {
 
         expect(mockSend).toHaveBeenCalledTimes(1);
         
-        // 🟢 VERIFICATION:
+        // VERIFICATION:
         // Because PutCommand is now real, 'command.input' is populated correctly.
         const command = mockSend.mock.calls[0][0] as PutCommand;
         

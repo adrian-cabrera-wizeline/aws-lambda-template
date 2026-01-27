@@ -1,0 +1,17 @@
+{
+  "httpMethod": "PUT",
+  "path": "/product",
+  "resource": "/product",
+  "queryStringParameters": {
+    "id": "REPLACE_WITH_REAL_UUID_FROM_DB"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"price\": 85.50}",
+  "requestContext": {
+    "authorizer": {
+      "claims": { "sub": "test-admin-user" }
+    }
+  }
+}

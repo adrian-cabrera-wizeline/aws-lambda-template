@@ -42,7 +42,6 @@ describe('AuditRepository (Integration)', () => {
                 }
             }));
 
-            // 3. Assert
             expect(result.Item).toBeDefined();
             expect(result.Item?.action).toBe('UPDATE');
             expect(result.Item?.performedBy).toBe('integration-test');

@@ -19,8 +19,8 @@
     "local:api": "npm run build && sam local start-api -t infra-local/local-debug.yaml --env-vars env.json --docker-network infra-local_default -d 5858",
     "invoke:price:create": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/create.json --env-vars env.json --docker-network infra-local_default",
     "invoke:price:get": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/read.json --env-vars env.json --docker-network infra-local_default",
-    "invoke:price:update": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/update-price.json --env-vars env.json --docker-network infra-local_default",
-    "invoke:price:delete": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/recall-product.json --env-vars env.json --docker-network infra-local_default"
+    "invoke:price:update": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/update.json --env-vars env.json --docker-network infra-local_default",
+    "invoke:price:delete": "npm run build && sam local invoke PriceFetcherFunction -t infra-local/local-debug.yaml -e events/price-fetcher/delete.json --env-vars env.json --docker-network infra-local_default"
 
   },
   "dependencies": {

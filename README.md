@@ -8,114 +8,8 @@ It allows authorized systems (like a Web Frontend or Mobile App) to look up the 
 
 **Key Technical Functions:**
 
-# Price Fetcher Service - User Journeys
-
-This service manages the lifecycle of products using a **Dual-Write Architecture**. It maintains the *Current State* in Oracle (for transactional integrity) and an *Immutable History* in DynamoDB (for audit compliance).
-
-## 1. Create Product (POST)
-**Goal:** Initialize a new item in the inventory.
-
-1.  **Request:** User sends `POST /product` with `{ name, price }`.
-2.  **Validation:**
-    * `name` must be 3+ characters.
-    * `price` must be positive.
-3.  **Oracle Transaction:**
-    * Generates a new UUID.
-    * Inserts row into `PRODUCTS` table with status `ACTIVE`.
-4.  **Audit Log:**
-    * Writes a `CREATE` event to DynamoDB (`PK: PRODUCT#{UUID}`).
-5.  **Response:** Returns `201 Created` with the generated `{ id }`.
-
----
-
-## 2. Get Product (GET)
-**Goal:** Retrieve the current live status of a product.
-
-1.  **Request:** User sends `GET /product?id={UUID}`.
-2.  **Oracle Query:**
-    * Selects the row where `ID = {UUID}`.
-3.  **Data Mapping:**
-    * Maps Oracle columns (e.g., `UPDATED_AT`) to JSON camelCase (`updatedAt`).
-4.  **Response:**
-    * If found: Returns `200 OK` with product details.
-    * If missing: Returns `404 Not Found`.
-
----
-
-## 3. Update Price (PUT)
-**Goal:** Change the price and record the history of the change.
-
-1.  **Request:** User sends `PUT /product` with `{ id, price }`.
-2.  **Pre-Flight Check:**
-    * Fetches the product from Oracle to verify it exists and get the *old price*.
-3.  **Oracle Update:**
-    * Updates `PRICE` column and sets `UPDATED_AT = SYSDATE`.
-4.  **Audit Log:**
-    * Writes an `UPDATE` event to DynamoDB.
-    * **Payload:** Includes both `oldPrice` and `newPrice` for diffing.
-5.  **Response:** Returns `200 OK`.
-
----
-
-## 4. Recall Product (DELETE)
-**Goal:** Soft-delete a product for compliance/safety reasons.
-
-1.  **Request:** User sends `DELETE /product?id={UUID}`.
-2.  **Oracle Update (Soft Delete):**
-    * Does **NOT** remove the row.
-    * Updates `STATUS` to `INACTIVE`.
-3.  **Audit Log:**
-    * Writes a `DEACTIVATE` event to DynamoDB.
-    * **Payload:** Includes the reason ("Manual API Recall").
-4.  **Response:** Returns `200 OK` confirming status is now `inactive`.
-
----
-
-### 🖼️ Visual Data Flow Diagram
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as 👤 User/Client
-    participant APIG as 🚪 API Gateway
-    participant Lambda as ⚡ Price Fetcher Lambda
-    participant Oracle as 🛢️ Oracle DB (Prices)
-    participant Dynamo as 📝 DynamoDB (Audit)
-
-    Note over Client, APIG: HTTP GET /price?id=PROD-101
-
-    Client->>APIG: Request Price
-    APIG->>Lambda: Invoke Handler (JSON Event)
-
-    activate Lambda
-    
-    %% Validation Phase
-    Lambda->>Lambda: 🛡️ Validate Inputs (Zod)
-    alt Invalid Input
-        Lambda-->>Client: 400 Bad Request
-    end
-
-    %% Logic Phase
-    Lambda->>Oracle: 🔍 SELECT price FROM products...
-    activate Oracle
-    Oracle-->>Lambda: Return Row {99.99, USD}
-    deactivate Oracle
-
-    %% Audit Phase
-    Lambda->>Dynamo: ✍️ PutItem (Audit Log)
-    activate Dynamo
-    Dynamo-->>Lambda: Ack (Success)
-    deactivate Dynamo
-
-    %% Response Phase
-    Lambda-->>APIG: Return { "price": 99.99 }
-    deactivate Lambda
-
-    APIG-->>Client: 200 OK (JSON)
-
-```
-
----
+Functions
+**[Price-Fetcher](link)**
 
 ### 🧩 Why this Architecture?
 
@@ -192,7 +86,7 @@ lambda-monorepo/
 
 ---
 
-## 🛠 Development Environment Setup
+## 🛠 Development Environment Setup For An Specific Lambda
 
 ### Prerequisites
 
@@ -203,22 +97,6 @@ Before starting, ensure your local machine has the following installed:
 * **AWS SAM CLI** ([Installation Guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html))
 * **AWS CLI** (Configured with any dummy credentials for local use)
 
-### Step 1: Install Dependencies
-
-Run this at the root of the project to install the compiler, build tools, and shared libraries.
-
-```bash
-npm install
-```
-
-### Step 2: Spin Up Local Infrastructure
-
-This project uses Docker to simulate the cloud environment (Oracle and DynamoDB).
-
-```bash
-# Start the containers and seed the data automatically
-npm run dev:env
-```
 
 ## 🚀 Development Workflow
 
@@ -241,15 +119,21 @@ We replicate the cloud environment on your laptop.
 | Goal | Command |
 | --- | --- |
 | **Start DBs** | `npm run dev:env` |
-| **Test "Price Fetcher"** | `npm run invoke:price` |
+| **Test "Lambda Service Name"** | `npm run invoke:lambda-name:event-action` |
 | **Run Unit Tests** | `npm test` |
 | **Stop Everything** | `npm run db:stop` |
 
 #### Step 1: Start the Infrastructure
-
-Open a terminal in your project root. Run the custom script defined in your `package.json`.
+Open a terminal in your project root to install the compiler, build tools, and shared libraries.
 
 ```bash
+npm install
+```
+
+Run the custom script defined in your `package.json`.
+
+```bash
+# Start the containers and seed the data automatically
 npm run dev:env
 ```
 
@@ -265,7 +149,8 @@ npm run dev:env
 To test your code, you don't need to deploy. You just "invoke" it against the local infrastructure.
 
 ```bash
-npm run invoke:price
+#in this case we are testing the price-fetcher function
+npm run invoke:price:read
 ```
 
 **What happens?**
@@ -282,6 +167,7 @@ npm run invoke:price
 3. **Result:** You see the JSON response in your terminal.
 
 ```json
+//this is just a dummy value
 {"statusCode":200,"body":"{\"productId\":\"PROD-101\",\"price\":99.99,\"currency\":\"USD\"}"}
 
 ```
@@ -291,9 +177,7 @@ npm run invoke:price
 Because AWS Lambda runs JavaScript, you must compile your TypeScript before testing.
 
 1. **Modify code** in `functions/`.
-2. **Build:** `npm run build` (bundles files into the `/dist` folder).
-3. **Test:** `npm run test` (executes Jest unit tests with mocks)
-4. **Invoke:** `npm run invoke:price` (runs the function locally via SAM).
+2. **Build & Invoke:** `npm run invoke:price:action` (bundles files into the `/dist` folder & runs the function locally via SAM).
 
 ### Database Seeding
 
@@ -338,37 +222,6 @@ In `infra-local/events/price-event.json`, we store a mock API Gateway request:
 npm run invoke:price
 ```
 
-
-### Testing via Local API Server (Recommended for Frontend Integration)
-
-If you want to test your Lambda using **Postman** or a **Browser**, you can tell SAM to host a local HTTP server that behaves exactly like API Gateway. 
-
-**1. Start the Local Server:**
-
-```bash
-cd infra-local
-sam local start-api -t local-debug.yaml --warm-containers EAGER
-
-```
-
-**2. Send a Request:**
-The server will start on `http://127.0.0.1:3000`. You can now use Postman to hit your endpoints:
-
-* **GET** `http://127.0.0.1:3000/price?id=PROD-101&userId=xxx`
-
-### Generating New Mock Events
-
-We use JSON files in `infra-local/events/` to simulate HTTP requests.
-
-* **Usage:** SAM reads this file and "injects" it into your handler as the `event` object.
-
-If you create a new Lambda (e.g., a POST request for Salesforce or an API), you can generate a valid API Gateway mock event using the SAM CLI:
-
-```bash
-# Generates a boilerplate API Gateway Proxy event
-sam local generate-event apigateway aws-proxy > infra-local/events/new-service-event.json
-```
----
 
 ### Step-by-Step: Debugging (Breakpoints) 🐞
 
