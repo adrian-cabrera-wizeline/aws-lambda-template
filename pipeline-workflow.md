@@ -1,5 +1,24 @@
 ## 📘 10. CI/CD Workflow Reference
 
+## Dev Pipeline Workflow in this Repo
+
+We will create a single **Reusable Workflow** in the SRE repo that handles **everything**: Setup, Testing, Building, and Deploying.
+
+**The Contract:**
+The Dev team only needs to promise one thing:
+
+> *"My code lives in `functions/<service-name>` and I have a `package.json` script."*
+
+### 📋 Master Lifecycle (Who Does What?)
+
+| Phase | Actor | Action | Outcome |
+| :--- | :--- | :--- | :--- |
+| **1. Factory (CI)** | **👷 Developer** | Merges Pull Request to `main`. | **Artifact Created.** GitHub builds `v1.0.0`, uploads it to the **S3 Vault**, and deploys it to **DEV** for immediate smoke testing. |
+| **2. QA Check** | **🕵️ QA Lead** | Validates functionality in QA. | **Gate Approval.** System auto-deploys to QA. QA team runs suites. If passing, QA Lead clicks **"Approve"** to unlock UAT. |
+| **3. UAT (Accept)** | **👓 Product Owner** | Validates business logic in UAT. | **Business Sign-off.** PO confirms the features match requirements in the UAT environment. Ready for management review. |
+| **4. Production** | **💼 Manager** | Reviews UAT feedback & Approves. | **Live Release.** Manager clicks **"Approve"** on the Prod Gate. GitHub updates Production Lambdas with the *exact same* `v1.0.0` zip. |
+| **5. DR Sync** | **🤖 Robot** | Listens for Prod Success. | **Global Redundancy.** Automatically wakes up after Prod deployment to sync the artifact to the Backup Region (e.g., US-West). |
+
 **The Correct Structure (The "Vault"):**
 We use **S3 Prefixes (Folders)** to organize everything in a single, secure bucket.
 
