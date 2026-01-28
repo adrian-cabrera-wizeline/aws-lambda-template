@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  # 1. ORACLE DATABASE (Express Edition)
+  # ORACLE DATABASE (Express Edition)
   oracle-local:
-    image: gvenzl/oracle-xe:21-slim
+    image: gvenzl/oracle-free:23-slim
     container_name: oracle-local
     ports:
       - "1521:1521"
@@ -18,7 +18,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 2. DYNAMODB LOCAL
+  # DYNAMODB LOCAL
   dynamodb-local:
     image: amazon/dynamodb-local
     container_name: dynamodb-local

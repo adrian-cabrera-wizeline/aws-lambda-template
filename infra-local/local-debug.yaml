@@ -48,7 +48,7 @@ Resources:
       Environment:
         Variables:
           AUDIT_TABLE_NAME: !Ref AuditTable
-          ORACLE_CONN_STRING: "oracle-local:1521/XEPDB1"
+          ORACLE_CONN_STRING: "oracle-local:1521/FREEPDB1"
           DYNAMODB_ENDPOINT: "http://dynamodb-local:8000"
       
       Policies:

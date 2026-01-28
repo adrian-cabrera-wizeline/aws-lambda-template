@@ -6,7 +6,7 @@ import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 // (Ensure your terminal has AWS credentials or AWS_REGION set)
 const TABLE_NAME = process.env.AUDIT_TABLE_NAME || 'AuditTable';
 const client = new DynamoDBClient({
-    // If testing locally with LocalStack:
+    // If testing locally with LocalStack or normal image:
     // endpoint: 'http://localhost:4566',
     // region: 'us-east-1'
 });

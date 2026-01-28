@@ -5,6 +5,7 @@
     "build": "node esbuild.config.js",
     "db:start": "docker-compose -f infra-local/docker-compose.yml up -d",
     "db:stop": "docker-compose -f infra-local/docker-compose.yml down",
+    "db:destroy:": "docker-compose -f infra-local/docker-compose.yml down -v",
     "db:seed": "npx ts-node infra-local/seed/seed-dynamo.ts",
 
     "dev:env": "npm run db:start && echo '⏳ Waiting for DBs...' && node -e \"setTimeout(() => {}, 10000)\" && npm run db:seed",

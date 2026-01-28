@@ -14,7 +14,7 @@ export const getOracleConnection = async () => {
             password: process.env.ORACLE_PASSWORD || 'oracle',
             // Switch: Local Docker vs Real Cloud
             connectString: isOffline 
-                ? 'host.docker.internal:1521/XEPDB1' 
+                ? 'host.docker.internal:1521/FREEPDB1' 
                 : process.env.ORACLE_CONN_STRING,
             poolMin: 1,
             poolMax: 2

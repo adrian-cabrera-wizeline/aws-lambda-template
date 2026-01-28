@@ -1,4 +1,4 @@
-# 📘 Developer Handbook: Cloud Backend Monorepo
+# 📘 Developer Handbook: Lambda Backend Monorepo
 
 ### What does this App do?
 
@@ -26,6 +26,122 @@ It allows authorized systems (like a Web Frontend or Mobile App) to look up the 
 
 3. **Why Lambda?**
 * **Reason:** "Bursty Traffic." Pricing checks happen sporadically. Lambda scales to 0 when no one is checking (saving money) and scales to 1,000s when a sale happens.
+
+
+Here is the **High-Level Architecture Diagram** for your Price Fetcher application.
+
+This diagram illustrates the **Local Development Environment**, showing how SAM, Docker, and your specific code modules (Handler, Service, Repository) interact within the `infra-local` network.
+
+### 🏗️ Application Architecture (Local & Cloud)
+
+```mermaid
+flowchart TD
+    %% ==========================================
+    %% STYLING
+    %% ==========================================
+    classDef actor fill:#1e293b,stroke:#334155,stroke-width:2px,color:#fff;
+    classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#fff;
+    classDef docker fill:#2496ED,stroke:#0f5e9c,stroke-width:2px,color:#fff;
+    classDef db fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff;
+    classDef code fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a,stroke-dasharray: 5 5;
+    classDef shared fill:#f1f5f9,stroke:#94a3b8,stroke-width:2px,color:#334155;
+
+    %% ==========================================
+    %% EXTERNAL WORLD
+    %% ==========================================
+    User((👨‍💻 Developer /<br/>Client)):::actor
+
+    %% ==========================================
+    %% HOST MACHINE & SAM
+    %% ==========================================
+    subgraph Host ["💻 Host Machine (Localhost)"]
+        direction TB
+        
+        SAM["⚡ SAM Local API<br/>(Simulates API Gateway)"]:::aws
+    end
+
+    %% ==========================================
+    %% DOCKER NETWORK
+    %% ==========================================
+    subgraph DockerNet ["🐳 Docker Network: infra-local_default"]
+        direction TB
+
+        %% LAMBDA CONTAINER (Ephemeral)
+        subgraph Lambda ["λ PriceFetcher Function"]
+            direction TB
+            
+            %% CODE LAYERS
+            Handler["🎮 Handler<br/>(Input Validation / Zod)"]:::code
+            Service["🧠 Service<br/>(Business Logic)"]:::code
+            
+            subgraph DataAccess ["💾 Data Access Layer"]
+                RepoOracle["Repository<br/>(Oracle)"]:::code
+                RepoDynamo["Repository<br/>(Audit)"]:::code
+            end
+            
+            %% SHARED KERNEL
+            Shared["📦 Common Lib<br/>(Logger, DB Pool)"]:::shared
+        end
+        
+        %% PERSISTENT STORAGE
+        Oracle[("🗄️ Oracle Database<br/>(State Store)<br/>Port: 1521")]:::db
+        Dynamo[("📜 DynamoDB Local<br/>(Audit Log)<br/>Port: 8000")]:::db
+    end
+
+    %% ==========================================
+    %% DATA FLOWS
+    %% ==========================================
+    %% 1. Request
+    User -- "1. HTTP Request<br/>(POST /product)" --> SAM
+    SAM -- "2. Docker Invoke<br/>(JSON Event)" --> Handler
+
+    %% 2. Internal Processing
+    Handler -- "3. Validates" --> Service
+    Service -- "4. Orchestrates" --> DataAccess
+    Shared -.->|"Injects Utils"| Service
+
+    %% 3. Dual Write (The Core Logic)
+    RepoOracle == "5a. Primary Write<br/>(SQL)" ==> Oracle
+    RepoDynamo -.->|"5b. Audit Log<br/>(JSON)"| Dynamo
+
+    %% 4. Response
+    Service -- "6. Return Result" --> Handler
+    Handler -- "7. JSON Response" --> SAM
+    SAM -- "8. 201 Created" --> User
+
+    %% ==========================================
+    %% LINKS STYLING
+    %% ==========================================
+    linkStyle 0,1,7 stroke:#232F3E,stroke-width:3px;
+    linkStyle 4,5 stroke:#16a34a,stroke-width:2px;
+    linkStyle 6 stroke:#ea580c,stroke-width:2px,stroke-dasharray: 5 5;
+
+```
+
+### 🧩 Diagram Breakdown
+
+#### 1. ⚡ The Entry Point (SAM Local)
+
+* **Role:** Acts as the **Gatekeeper**. It simulates AWS API Gateway.
+* **Action:** It receives your `curl` or Postman request on `localhost:3000` and converts it into a JSON "Event" (the payload you see in your logs).
+* **Bridge:** It spins up a temporary Docker container for your code to run in.
+
+#### 2. 🧠 The "Shared Kernel" (Common Lib)
+
+* **Visualized as:** `📦 Common Lib`.
+* **Importance:** Notice how it sits inside the Lambda. This represents your **Monorepo Architecture**. The `common/` folder is bundled *into* the function at build time, providing the shared Logger, Error Handling, and Database Connection logic.
+
+#### 3. 💾 The Dual-Write Transaction
+
+This is the heart of your application's reliability:
+
+* **Arrow 5a (Solid Green):** Represents the **Synchronous** write to Oracle. This is the "Truth." If this fails, the request fails.
+* **Arrow 5b (Dotted Orange):** Represents the **Audit** write to DynamoDB. While crucial for compliance, the logic (in `service.ts`) ensures that even if Audit fails, we catch the error to decide if we should rollback the Oracle transaction or just alert (depending on your strictness).
+
+#### 4. 🐳 The Docker Network
+
+* **Isolation:** Everything inside the blue box (`Docker Network`) can talk to each other using **Service Names** (e.g., `oracle-local`).
+* **Access:** The Lambda can reach Oracle because they share this bridge. If they were on different networks (or if you used `localhost` inside the Lambda), the connection would fail.
 
 ### 📂 Project Directory Structure
 
@@ -167,6 +283,8 @@ npm run invoke:price:read
 
 **What happens?**
 
+When you run sam local invoke, SAM automatically mounts your ~/.aws/credentials file into the Docker container. This "tricks" the SDK into thinking it has valid permissions, allowing it to proceed to talk to your local DynamoDB.
+
 1. **Build:** Runs `esbuild` to compile your TypeScript into `dist/`.
 2. **SAM Invoke:**
 * Reads `infra-local/local-debug.yaml`.
@@ -211,7 +329,7 @@ Because your Lambdas are designed to sit behind an AWS API Gateway, they expect 
 This method injects a "frozen" JSON event directly into your Lambda. It is the fastest way to test specific scenarios (e.g., a missing User ID).
 
 **1. The Event File:**
-In `infra-local/events/price-event.json`, we store a mock API Gateway request:
+In `infra-local/events/lambda/price-event.json`, we store a mock API Gateway request:
 
 ```json
 {

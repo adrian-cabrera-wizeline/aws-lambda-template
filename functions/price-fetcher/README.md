@@ -4,7 +4,7 @@ This service manages the lifecycle of products using a **Dual-Write Architecture
 
 ### 🧠 Logic Breakdown by Color
 
-#### 🟥 The Sad Paths (Red)
+#### 🟥 The Sad Paths
 
 These blocks represent "Early Exits" where the flow stops immediately to protect the system.
 
@@ -12,14 +12,14 @@ These blocks represent "Early Exits" where the flow stops immediately to protect
 * **Logic (Read/Update):** The Service checks if the ID exists. If Oracle returns `null`, the Service throws `PRODUCT_NOT_FOUND`, preventing operations on non-existent items.
 * **Infrastructure (Delete):** If the Database crashes or times out, the Middleware catches the error and returns a generic `500` to avoid leaking system details.
 
-#### 🟧 The Normal Paths (Beige)
+#### 🟧 The Normal Paths
 
 These blocks represent the standard business logic that must happen *before* we commit changes.
 
 * **Validation Success:** Zod confirms the data types are correct.
 * **Pre-flight Checks:** In `UPDATE` and `DELETE`, the code *must* read the current state (e.g., to get the `oldPrice` for the audit log) before it can write the new state.
 
-#### 🟩 The Happy Paths (Green)
+#### 🟩 The Happy Paths
 
 These blocks represent the **Dual-Write Transaction**.
 

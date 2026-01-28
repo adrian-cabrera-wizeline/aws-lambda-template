@@ -26,6 +26,11 @@ const auditRepo = new AuditRepository(ddbClient, process.env.AUDIT_TABLE_NAME ||
 let service: ProductService;
 
 const lambdaHandler = async (event: APIGatewayProxyEvent, context: Context) => {
+
+    /*Tell Lambda not to wait for the DB pool to close, 
+    by doing this reuses the connection in the next invocation (Warm Start), 
+    which is much faster than connecting from scratch every time.*/
+    context.callbackWaitsForEmptyEventLoop = false;
     // Dependency Injection (Composition Root)
     if (!service) {
         // @ts-ignore: context.db is injected by oracleMiddleware
