@@ -1,0 +1,12 @@
+{
+  "httpMethod": "GET",
+  "path": "/product",
+  "resource": "/product",
+  "body": null,
+  "queryStringParameters": {
+    "id": "REPLACE_WITH_REAL_UUID_FROM_DB" 
+  },
+  "requestContext": {
+    "authorizer": { "claims": { "sub": "test-user" } }
+  }
+}

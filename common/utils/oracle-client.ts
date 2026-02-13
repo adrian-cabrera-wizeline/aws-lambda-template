@@ -1,19 +1,27 @@
-import oracledb, { Pool } from 'oracledb';
-import { logger } from '../middleware/logger';
+import oracledb from 'oracledb';
 
-let pool: Pool | null = null;
+// Enable Thin Mode
+try { oracledb.initOracleClient({ libDir: undefined }); } catch (e) {}
 
-export const getOraclePool = async (): Promise<Pool> => {
-  if (pool) return pool;
+let pool: oracledb.Pool | null = null;
 
-  logger.info("Initializing Oracle Pool...");
-  
-  pool = await oracledb.createPool({
-    user: process.env.ORACLE_USER,
-    password: process.env.ORACLE_PASSWORD,
-    connectString: `${process.env.ORACLE_HOST}:${process.env.ORACLE_PORT}/${process.env.ORACLE_SID}`,
-    poolMin: 1, poolMax: 1
-  });
+export const getOracleConnection = async () => {
+    if (!pool) {
+        const isOffline = process.env.IS_OFFLINE === 'true';
+        
+        const dbConfig = {
+            user: process.env.ORACLE_USER || 'system',
+            password: process.env.ORACLE_PASSWORD || 'oracle',
+            // Switch: Local Docker vs Real Cloud
+            connectString: isOffline 
+                ? 'host.docker.internal:1521/FREEPDB1' 
+                : process.env.ORACLE_CONN_STRING,
+            poolMin: 1,
+            poolMax: 2
+        };
 
-  return pool;
+        console.log(`Connecting to Oracle (${isOffline ? 'OFFLINE' : 'CLOUD'})...`);
+        pool = await oracledb.createPool(dbConfig);
+    }
+    return pool.getConnection();
 };

@@ -1,8 +1,10 @@
+//this is an incomplete lamnbda implementation,was left only for testing purpouses
+
 import middy from '@middy/core';
 import { injectLambdaContext } from '@aws-lambda-powertools/logger';
-import { logger } from '@common/middleware/logger';
+import { logger, metrics } from '../../../common/utils/observability-tools';
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient } from "@common/utils/dynamo-client";
+import { docClient } from '../../../common/utils/dynamodb-client';
 
 const lambdaHandler = async (event: any) => {
   const userId = event.queryStringParameters?.userId;

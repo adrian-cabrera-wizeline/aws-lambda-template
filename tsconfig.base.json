@@ -2,7 +2,8 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
-    "lib": ["ES2022"],
+    "isolatedModules": true, 
+    "allowJs": true,
     "strict": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
@@ -16,6 +17,5 @@
     },
     "types": ["node", "aws-lambda", "jest"]
   },
-  "include": ["**/*"],
   "exclude": ["node_modules", "dist", ".aws-sam", "cdk.out"]
 }

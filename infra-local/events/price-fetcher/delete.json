@@ -1,0 +1,14 @@
+{
+  "httpMethod": "DELETE",
+  "path": "/product",
+  "resource": "/product",
+  "queryStringParameters": {
+    "id": "REPLACE_WITH_REAL_UUID_FROM_DB"
+  },
+  "body": null,
+  "requestContext": {
+    "authorizer": {
+      "claims": { "sub": "test-admin-user" }
+    }
+  }
+}
